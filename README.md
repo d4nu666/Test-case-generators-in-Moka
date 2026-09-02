@@ -1,7 +1,7 @@
 # Test Case Generators in Moka
 
 > Bachelor thesis project — Dan (`d4nu666`), DTU.
-> **Status:** in progress. *(Originally listed as: AVAILABLE, NO ONGOING STUDENT PROJECT.)*
+> **Status:** in progress. 
 
 This repository is my working fork of the [Team Checkr](https://github.com/team-checkr) toolchain
 behind [Moka](https://team-checkr.github.io/), extended with test case generators.
@@ -20,22 +20,6 @@ examples or examples taken from teaching materials.
 ## What is the goal?
 
 Design and implement test case generators for Moka.
-
-## Why should I care?
-
-The main aim is to provide a better learning experience for the tool's users. An additional aim is
-to stress-test the tool with further testing.
-
-## What should I know?
-
-- Good command of model checking as taught in [02141](https://kurser.dtu.dk/course/02141).
-- You need to follow the new edition of the
-  [special course on Inspectify/Rust/Svelte](https://gitlab.gbar.dtu.dk/02141/2026-primr).
-
-## What will I learn?
-
-Automated test-case generation techniques, and a deeper look at the theory and practice of model
-checking.
 
 ---
 
