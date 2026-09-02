@@ -1,0 +1,23 @@
+[package]
+name = "chip"
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+clap.workspace = true
+indexmap.workspace = true
+itertools.workspace = true
+lalrpop-util.workspace = true
+mcltl.workspace = true
+miette.workspace = true
+once_cell.workspace = true
+serde.workspace = true
+smtlib.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+lalrpop.workspace = true

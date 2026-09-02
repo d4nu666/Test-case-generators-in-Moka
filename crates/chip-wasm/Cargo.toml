@@ -1,0 +1,31 @@
+[package]
+name = "chip-wasm"
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+chip.workspace = true
+comfy-table = { version = "7.1.1", default-features = false }
+console_error_panic_hook = "0.1.7"
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
+indexmap.workspace = true
+itertools.workspace = true
+mcltl.workspace = true
+miette.workspace = true
+once_cell.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+smol_str.workspace = true
+thiserror.workspace = true
+tracing-wasm = "0.2.1"
+tracing.workspace = true
+tsify = { version = "0.5.5", default-features = false, features = ["js"] }
+wasm-bindgen = "0.2.87"
+web-sys = { version = "0.3.69", features = ["console"] }

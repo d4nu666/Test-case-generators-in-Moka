@@ -1,0 +1,24 @@
+[package]
+name = "xtask"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+ce-core.workspace = true
+clap.workspace = true
+color-eyre.workspace = true
+heck = "0.5.0"
+indicatif = { version = "0.17.11", features = ["rayon"] }
+itertools.workspace = true
+rayon = "1.10.0"
+reqwest = { version = "0.12.15", features = ["json"] }
+serde.workspace = true
+serde_json.workspace = true
+tapi.workspace = true
+tokio.workspace = true
+toml_edit = "0.22.23"
+tracing.workspace = true
+xshell = "0.2.3"

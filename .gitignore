@@ -1,0 +1,32 @@
+# --- Rust ---
+/target/
+**/target/
+*.rs.bk
+*.pdb
+
+# --- Node / frontend ---
+node_modules/
+.svelte-kit/
+/apps/*/build/*
+!/apps/*/build/.gitkeep
+/apps/*/.svelte-kit/
+/apps/*/package/
+dist/
+pkg/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Misc build output ---
+*.log

@@ -1,0 +1,262 @@
+use std::str::FromStr;
+use indexmap::IndexMap;
+use crate::{ast::*, parse::SourceSpan};
+
+grammar;
+
+extern {
+    type Error = crate::parse::CustomError;
+}
+
+match {
+    // Skip whitespace and comments
+    r"\s*" => { },
+    r"//[^\n\r]*[\n\r]*" => { }, // `// comment`
+    r"/\*([^\*]*\*+[^\*/])*([^\*]*\*+|[^\*])*\*/" => { }, // `/* comment */`
+    _
+}
+
+Sep<T, S>: Vec<T> = {
+    <mut v:(<T> S)*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+SepNonEmpty<T, S>: Vec<T> = {
+    <mut v:(<T> S)*> <e:T> =>{
+        v.push(e);
+        v
+    }
+};
+
+#[inline]
+Target: Target<Box<AExpr>> = {
+    Variable => Target::Variable(<>),
+}
+#[inline]
+Variable: Variable = Var => Variable(<>);
+
+Function<X>: Function = {
+    "division" "(" <X> "," <X> ")"  => Function::Division(<>),
+    "min" "(" <X> "," <X> ")"       => Function::Min(<>),
+    "max" "(" <X> "," <X> ")"       => Function::Max(<>),
+    "fac" "(" <X> ")"               => Function::Fac(<>),
+    "fib" "(" <X> ")"               => Function::Fib(<>),
+    "exp" "(" <X> "," <X> ")"       => Function::Exp(<>),
+};
+
+
+pub BExpr: BExpr = {
+    #[precedence(level="0")]
+    <l:AExpr_> <op:RelOp> <r:AExpr_> => BExpr::Rel(l, op, r),
+    "true" => BExpr::Bool(true),
+    "false" => BExpr::Bool(false),
+    "!" <BExpr> => BExpr::Not(Box::new(<>)),
+    "(" <BExpr_> ")",
+
+    #[precedence(level="1")] #[assoc(side="left")]
+    <l:BExpr> "&" <r:BExpr> => BExpr::logic(l, LogicOp::Land, r),
+
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:BExpr> "|" <r:BExpr> => BExpr::logic(l, LogicOp::Lor, r),
+};
+BExpr_: BExpr = BExpr;
+
+RelOp: RelOp = {
+    "<"  => RelOp::Lt,
+    ">"  => RelOp::Gt,
+    "<=" => RelOp::Le,
+    ">=" => RelOp::Ge,
+    "="  => RelOp::Eq,
+    "!=" => RelOp::Ne,
+};
+
+Var: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
+
+Int: Int = <from:@L> <int:r"[0-9]+"> <to:@R> =>? Int::from_str(int).map_err(|_| lalrpop_util::ParseError::User {
+    error: crate::parse::CustomError::IntegerTooLarge { from, to },
+});
+
+// Predicates
+
+pub AGCLCommands: Commands<PredicateChain, PredicateBlock> = SepNonEmpty<AGCLCommand, ";"> => Commands(<>);
+AGCLCommand: Command<PredicateChain, PredicateBlock> = {
+    <pre:PredicateChain> <l:@L> <kind:AGCLCommandKind> <r:@R> <post:PredicateChain> =>
+        Command {
+            pre,
+            kind,
+            post,
+            span: (l, r - l).into(),
+        }
+};
+AGCLCommandKind: CommandKind<PredicateChain, PredicateBlock> = {
+    <Target> ":=" <AExpr>                       => CommandKind::Assignment(<>),
+    "skip"                                      => CommandKind::Skip,
+    "if" <AGCLGuards> "fi"                          => CommandKind::If(<>),
+    "do" <PredicateInv> <AGCLGuards> "od" => CommandKind::Loop(<>),
+};
+AGCLGuards: Vec<Guard<PredicateChain, PredicateBlock>> = SepNonEmpty<AGCLGuard, "[]">;
+AGCLGuard: Guard<PredicateChain, PredicateBlock> = {
+    <l:@L> <guard:BExpr> <r:@R> "->" <cmds:AGCLCommands> => Guard { guard, cmds, guard_span: (l, r - l).into() },
+};
+
+LTLCommands: Commands<(), ()> = SepNonEmpty<LTLCommand, ";"> => Commands(<>);
+LTLCommand: Command<(), ()> = {
+    <l:@L> <kind:LTLCommandKind> <r:@R> =>
+        Command {
+            pre: (),
+            kind,
+            post: (),
+            span: (l, r - l).into(),
+        }
+};
+LTLCommandKind: CommandKind<(), ()> = {
+    <Target> ":=" <AExpr>                       => CommandKind::Assignment(<>),
+    "skip"                                      => CommandKind::Skip,
+    "placeholder"                               => CommandKind::Placeholder,
+    "if" <LTLGuards> "fi"                          => CommandKind::If(<>),
+    "do" <LTLGuards> "od" => CommandKind::Loop((), <>),
+};
+LTLGuards: Vec<Guard<(), ()>> = SepNonEmpty<LTLGuard, "[]">;
+LTLGuard: Guard<(), ()> = {
+    <l:@L> <guard:BExpr> <r:@R> "->" <cmds:LTLCommands> => Guard { guard, cmds, guard_span: (l, r - l).into() },
+};
+
+PredicateChain: PredicateChain = {
+    <predicates:PredicateBlock*> => PredicateChain { <> }
+};
+
+PredicateBlock: PredicateBlock = {
+    <l:@L> "{" <predicate:Predicate> "}" <r:@R> => PredicateBlock {
+        predicate,
+        span: (l, r - l).into(),
+    }
+};
+
+PredicateInv: PredicateBlock = {
+    <l:@L> "[" <predicate:Predicate> "]" <r:@R> => PredicateBlock {
+        predicate,
+        span: (l, r - l).into(),
+    }
+};
+
+pub Predicate: Predicate = {
+    #[precedence(level="0")]
+    <l:AExpr_> <op:RelOp> <r:AExpr_> => Predicate::Rel(l, op, r),
+    "true" => Predicate::Bool(true),
+    "false" => Predicate::Bool(false),
+    "!" <Predicate> => Predicate::Not(Box::new(<>)),
+    "(" <Predicate_> ")",
+
+    #[precedence(level="1")] #[assoc(side="left")]
+    <l:Predicate> "&" <r:Predicate> => Predicate::logic(l, LogicOp::Land, r),
+
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:Predicate> "|" <r:Predicate> => Predicate::logic(l, LogicOp::Lor, r),
+
+    #[precedence(level="3")] #[assoc(side="right")]
+    <l:Predicate> "==>" <r:Predicate> => Predicate::logic(l, LogicOp::Implies, r),
+
+    #[precedence(level="4")]
+    <q:Quantifier> <v:Var> "::" <p:Predicate> => Predicate::Quantified(q, Target::Variable(Variable(v)), Box::new(p)),
+};
+Predicate_: Predicate = Predicate;
+
+Quantifier: Quantifier = {
+    "exists" => Quantifier::Exists,
+    "forall" => Quantifier::Forall,
+};
+
+AExpr_ = AExpr;
+pub AExpr: AExpr = {
+    #[precedence(level="1")]
+    Int => AExpr::Number(<>),
+    Target => AExpr::Reference(<>),
+    // TODO: see issue #58
+    // "X" => AExpr::Reference(Target::Variable(Variable("X".to_string()))),
+    // "G" => AExpr::Reference(Target::Variable(Variable("G".to_string()))),
+    // "F" => AExpr::Reference(Target::Variable(Variable("F".to_string()))),
+    Function<AExprBox> => AExpr::Function(<>),
+    "-" <AExpr> => AExpr::Minus(Box::new(<>)),
+    "old" "(" <Target> ")" => AExpr::Old(<>),
+    "(" <AExpr_> ")",
+
+    #[precedence(level="3")] #[assoc(side="left")]
+    <l:AExpr> "*" <r:AExpr> => AExpr::binary(l, AOp::Times, r),
+    <l:AExpr> "/" <r:AExpr> => AExpr::binary(l, AOp::Divide, r),
+
+    #[precedence(level="4")] #[assoc(side="left")]
+    <l:AExpr> "+" <r:AExpr> => AExpr::binary(l, AOp::Plus, r),
+    <l:AExpr> "-" <r:AExpr> => AExpr::binary(l, AOp::Minus, r),
+};
+AExprBox: Box<AExpr> = AExpr => Box::new(<>);
+
+// Formats
+
+pub LTLProgram: LTLProgram = {
+    <initial:LTLInitialAssign>
+    <commands:LTLCommands>
+    <properties:LTLProperty*> => LTLProgram {
+        initial,
+        commands: vec![commands],
+        properties,
+    },
+
+    <initial:LTLInitialAssign>
+    "par"
+    <commands:SepNonEmpty<LTLCommands, "[]">>
+    "rap"
+    <properties:LTLProperty*> => LTLProgram {
+        initial,
+        commands,
+        properties,
+    },
+};
+
+LTLInitialAssign: IndexMap<Variable, Int> = {
+    <assignments:(">" <SepNonEmpty<LTLVariableAssignment, ",">>)*> =>
+        assignments.into_iter().flatten().collect(),
+};
+
+LTLVariableAssignment: (Variable, Int) = {
+    <var:Var> "=" <val:Int> => (Variable(var), val),
+    <var:Var> "=" "-" <val:Int> => (Variable(var), -val),
+};
+
+LTLProperty: (SourceSpan, LTLFormula) = {
+    "check" <l:@L> <ltl:LTLFormula> <r:@R> =>
+        ((l, r - l).into(), ltl),
+}
+
+
+// LTL Formula with precedence
+LTLFormula_ = LTLFormula;
+LTLFormula: LTLFormula = {
+    #[precedence(level="0")]
+    <l:AExpr_> <op:RelOp> <r:AExpr_> => LTLFormula::Rel(l, op, r),
+    "true" => LTLFormula::Bool(true),
+    "false" => LTLFormula::Bool(false),
+    "init" => LTLFormula::Locator(Locator::Init),
+    "stuck" => LTLFormula::Locator(Locator::Stuck),
+    "terminated" => LTLFormula::Locator(Locator::Terminated),
+    "!" <LTLFormula> => LTLFormula::Not(Box::new(<>)),
+    "X" <LTLFormula> => LTLFormula::Next(Box::new(<>)),
+    "G" <LTLFormula> => LTLFormula::Globally(Box::new(<>)),
+    "F" <LTLFormula> => LTLFormula::Finally(Box::new(<>)),
+    "(" <LTLFormula_> ")",
+
+    #[precedence(level="1")] #[assoc(side="left")]
+    <l:LTLFormula> "&" <r:LTLFormula> => LTLFormula::And(Box::new(l), Box::new(r)),
+
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:LTLFormula> "|" <r:LTLFormula> => LTLFormula::Or(Box::new(l), Box::new(r)),
+
+    #[precedence(level="3")] #[assoc(side="right")]
+    <l:LTLFormula> "==>" <r:LTLFormula> => LTLFormula::Implies(Box::new(l), Box::new(r)),
+
+    #[precedence(level="6")] #[assoc(side="right")]
+    <l:LTLFormula> "U" <r:LTLFormula> => LTLFormula::Until(Box::new(l), Box::new(r)),
+};
