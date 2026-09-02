@@ -511,6 +511,7 @@ dependencies = [
  "mcltl",
  "miette 7.6.0",
  "once_cell",
+ "rand 0.9.1",
  "serde",
  "smtlib",
  "thiserror 2.0.12",

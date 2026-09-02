@@ -6,6 +6,9 @@ repository.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+generate = ["dep:rand"]
+
 [dependencies]
 clap.workspace = true
 indexmap.workspace = true
@@ -14,6 +17,7 @@ lalrpop-util.workspace = true
 mcltl.workspace = true
 miette.workspace = true
 once_cell.workspace = true
+rand = { workspace = true, optional = true }
 serde.workspace = true
 smtlib.workspace = true
 thiserror.workspace = true
