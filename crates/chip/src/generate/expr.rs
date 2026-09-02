@@ -1,0 +1,170 @@
+use rand::{Rng, seq::IndexedRandom};
+
+use crate::{
+    ast::{AExpr, AOp, BExpr, Function, LogicOp, RelOp, Target, Variable},
+    generate::{budget::Budget, params::Params},
+};
+
+pub struct Ctx<'a> {
+    pub params: &'a Params,
+    pub vars: &'a [Variable],
+}
+
+impl<'a> Ctx<'a> {
+    pub fn new(params: &'a Params, vars: &'a [Variable]) -> Self {
+        debug_assert!(!vars.is_empty(), "Γ must be non-empty");
+        Ctx { params, vars }
+    }
+}
+
+pub(crate) fn pick<R: Rng>(alts: &[(f32, u8)], rng: &mut R) -> u8 {
+    match alts.choose_weighted(rng, |a| a.0.max(0.0)) {
+        Ok(&(_, tag)) => tag,
+        Err(_) => alts[0].1,
+    }
+}
+
+/// generating an arithmetic expression
+pub fn aexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> AExpr {
+    let w = &cx.params.w_aexpr;
+    let decay = if budget.exhausted() {
+        0.0
+    } else {
+        budget.decay(cx.params.max_depth_expr)
+    };
+    let functions = if cx.params.allow_functions { 1.0 } else { 0.0 };
+    let afford = |cost: u32| if budget.size_left() >= cost { 1.0 } else { 0.0 };
+
+    let tag = pick(
+        &[
+            (w.number, 0),
+            (w.reference, 1),
+            (w.binary * decay * afford(3), 2),
+            (w.neg * decay * afford(2), 3),
+            (w.function * decay * functions, 4),
+        ],
+        rng,
+    );
+    budget.spend();
+
+    match tag {
+        0 => AExpr::Number(cx.params.int_range.sample_i32(rng)),
+        1 => AExpr::Reference(target(cx, rng)),
+        2 => {
+            let op = aop(cx, rng);
+            let mut d = budget.descend();
+            let lhs = aexpr(cx, &mut d, rng);
+            let rhs = if op == AOp::Divide {
+                d.spend();
+                nonzero_literal(cx, rng)
+            } else {
+                aexpr(cx, &mut d, rng)
+            };
+            AExpr::Binary(Box::new(lhs), op, Box::new(rhs))
+        }
+        3 => {
+            let mut d = budget.descend();
+            AExpr::Minus(Box::new(aexpr(cx, &mut d, rng)))
+        }
+        _ => AExpr::Function(function(cx, rng)),
+    }
+}
+
+/// genrating a Boolean expression using guard
+pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
+    let w = &cx.params.w_bexpr;
+    let decay = if budget.exhausted() {
+        0.0
+    } else {
+        budget.decay(cx.params.max_depth_expr)
+    };
+
+    let afford = |cost: u32| if budget.size_left() >= cost { 1.0 } else { 0.0 };
+
+    let tag = pick(
+        &[
+            (w.constant, 1),
+            (w.rel * afford(3), 0),
+            (w.and * decay * afford(5), 2),
+            (w.or * decay * afford(5), 3),
+            (w.not * decay * afford(2), 4),
+        ],
+        rng,
+    );
+    budget.spend();
+
+    match tag {
+        0 => {
+            let op = relop(cx, rng);
+            let mut d = budget.descend();
+            let lhs = aexpr(cx, &mut d, rng);
+            let rhs = aexpr(cx, &mut d, rng);
+            BExpr::Rel(lhs, op, rhs)
+        }
+        1 => BExpr::Bool(rng.random_bool(0.5)),
+        2 | 3 => {
+            let op = if tag == 2 { LogicOp::Land } else { LogicOp::Lor };
+            let mut d = budget.descend();
+            let lhs = bexpr(cx, &mut d, rng);
+            let rhs = bexpr(cx, &mut d, rng);
+            BExpr::Logic(Box::new(lhs), op, Box::new(rhs))
+        }
+        _ => {
+            let mut d = budget.descend();
+            BExpr::Not(Box::new(bexpr(cx, &mut d, rng)))
+        }
+    }
+}
+
+pub fn target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
+    Target::Variable(cx.vars.choose(rng).expect("Γ is non-empty").clone())
+}
+
+pub fn aop<R: Rng>(cx: &Ctx, rng: &mut R) -> AOp {
+    let alts: &[AOp] = if cx.params.allow_division {
+        &[AOp::Plus, AOp::Minus, AOp::Times, AOp::Divide]
+    } else {
+        &[AOp::Plus, AOp::Minus, AOp::Times]
+    };
+    *alts.choose(rng).expect("alts is non-empty")
+}
+
+pub fn relop<R: Rng>(_cx: &Ctx, rng: &mut R) -> RelOp {
+    let alts = [
+        (1.0f32, RelOp::Lt),
+        (1.0, RelOp::Le),
+        (1.0, RelOp::Gt),
+        (1.0, RelOp::Ge),
+        (0.4, RelOp::Eq),
+        (0.4, RelOp::Ne),
+    ];
+    alts.choose_weighted(rng, |a| a.0)
+        .map(|a| a.1)
+        .unwrap_or(RelOp::Lt)
+}
+
+fn nonzero_literal<R: Rng>(cx: &Ctx, rng: &mut R) -> AExpr {
+    let n = cx.params.int_range.sample_i32(rng);
+    AExpr::Number(if n == 0 { 1 } else { n })
+}
+
+/// the function application
+fn function<R: Rng>(cx: &Ctx, rng: &mut R) -> Function {
+    fn small<R: Rng>(rng: &mut R) -> Box<AExpr> {
+        Box::new(AExpr::Number(rng.random_range(0..=5)))
+    }
+
+    let tags: &[u8] = if cx.params.allow_division {
+        &[0, 1, 2, 3, 4, 5]
+    } else {
+        &[0, 1, 2, 3, 4]
+    };
+    match *tags.choose(rng).expect("tags is non-empty") {
+        0 => Function::Min(small(rng), small(rng)),
+        1 => Function::Max(small(rng), small(rng)),
+        2 => Function::Fac(small(rng)),
+        3 => Function::Fib(small(rng)),
+        4 => Function::Exp(small(rng), small(rng)),
+        _ => Function::Division(small(rng), nonzero_literal(cx, rng).into()),
+    }
+}
