@@ -103,7 +103,11 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
         }
         1 => BExpr::Bool(rng.random_bool(0.5)),
         2 | 3 => {
-            let op = if tag == 2 { LogicOp::Land } else { LogicOp::Lor };
+            let op = if tag == 2 {
+                LogicOp::Land
+            } else {
+                LogicOp::Lor
+            };
             let mut d = budget.descend();
             let lhs = bexpr(cx, &mut d, rng);
             let rhs = bexpr(cx, &mut d, rng);

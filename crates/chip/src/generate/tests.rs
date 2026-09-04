@@ -51,7 +51,10 @@ fn different_seeds_differ() {
     let params = Params::default();
     let a = program(&params, 1).to_string();
     let b = program(&params, 2).to_string();
-    assert_ne!(a, b, "two seeds produced identical programs — is the RNG plumbed through?");
+    assert_ne!(
+        a, b,
+        "two seeds produced identical programs — is the RNG plumbed through?"
+    );
 }
 
 // budgets
@@ -102,7 +105,7 @@ fn depth_budgets_are_respected() {
     }
 }
 
-// semantic validity 
+// semantic validity
 
 #[test]
 fn every_variable_is_in_scope() {
@@ -126,14 +129,21 @@ fn no_reserved_words_as_variables() {
     for seed in 0..SEEDS {
         let p = program(&params, seed);
         for v in p.initial.keys() {
-            assert!(!names::is_reserved(&v.0), "seed {seed}: `{}` is reserved", v.0);
+            assert!(
+                !names::is_reserved(&v.0),
+                "seed {seed}: `{}` is reserved",
+                v.0
+            );
         }
     }
 }
 
 #[test]
 fn no_division_when_disabled() {
-    let params = Params { allow_division: false, ..Params::default() };
+    let params = Params {
+        allow_division: false,
+        ..Params::default()
+    };
     for seed in 0..SEEDS {
         let p = program(&params, seed);
         assert!(
@@ -216,7 +226,10 @@ fn depths(p: &LTLProgram) -> (u32, u32) {
         }
         (cmd_d, expr_d)
     }
-    p.commands.iter().map(cd).fold((0, 0), |a, b| (a.0.max(b.0), a.1.max(b.1)))
+    p.commands
+        .iter()
+        .map(cd)
+        .fold((0, 0), |a, b| (a.0.max(b.0), a.1.max(b.1)))
 }
 
 fn walk_aexprs<F: FnMut(&AExpr)>(p: &LTLProgram, f: &mut F) {

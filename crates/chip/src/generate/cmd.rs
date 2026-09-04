@@ -39,7 +39,11 @@ pub fn command<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Command<()
     let w = &cx.params.w_cmd;
     let recur = if budget.exhausted() { 0.0 } else { 1.0 };
     // A branch is only offered when at least one complete guard fits
-    let afford = if budget.size_left() >= MIN_GUARD + 1 { 1.0 } else { 0.0 };
+    let afford = if budget.size_left() >= MIN_GUARD + 1 {
+        1.0
+    } else {
+        0.0
+    };
 
     let tag = pick(
         &[

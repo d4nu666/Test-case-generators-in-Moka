@@ -34,7 +34,12 @@ pub struct CmdWeights {
 
 impl Default for CmdWeights {
     fn default() -> Self {
-        Self { assign: 1.0, skip: 0.15, if_: 0.5, loop_: 0.6 }
+        Self {
+            assign: 1.0,
+            skip: 0.15,
+            if_: 0.5,
+            loop_: 0.6,
+        }
     }
 }
 
@@ -49,7 +54,13 @@ pub struct AExprWeights {
 
 impl Default for AExprWeights {
     fn default() -> Self {
-        Self { number: 0.4, reference: 0.8, binary: 0.6, neg: 0.1, function: 0.0 }
+        Self {
+            number: 0.4,
+            reference: 0.8,
+            binary: 0.6,
+            neg: 0.1,
+            function: 0.0,
+        }
     }
 }
 
@@ -64,7 +75,13 @@ pub struct BExprWeights {
 
 impl Default for BExprWeights {
     fn default() -> Self {
-        Self { rel: 1.0, and: 0.3, or: 0.3, not: 0.15, constant: 0.05 }
+        Self {
+            rel: 1.0,
+            and: 0.3,
+            or: 0.3,
+            not: 0.15,
+            constant: 0.05,
+        }
     }
 }
 
@@ -121,7 +138,12 @@ impl Default for Params {
 
 impl Params {
     pub fn teaching() -> Self {
-        Self { size_budget: 25, max_depth_cmd: 2, max_depth_expr: 2, ..Self::default() }
+        Self {
+            size_budget: 25,
+            max_depth_cmd: 2,
+            max_depth_expr: 2,
+            ..Self::default()
+        }
     }
 
     pub fn stress() -> Self {

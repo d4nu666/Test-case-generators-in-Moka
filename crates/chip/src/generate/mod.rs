@@ -79,15 +79,19 @@ pub fn node_count(p: &LTLProgram) -> usize {
                 CommandKind::Assignment(_, e) => 1 + aexpr(e),
                 CommandKind::Skip | CommandKind::Placeholder => 1,
                 CommandKind::If(gs) => {
-                    1 + gs.iter().map(|g| bexpr(&g.guard) + cmds(&g.cmds)).sum::<usize>()
+                    1 + gs
+                        .iter()
+                        .map(|g| bexpr(&g.guard) + cmds(&g.cmds))
+                        .sum::<usize>()
                 }
                 CommandKind::Loop(_, gs) => {
-                    1 + gs.iter().map(|g| bexpr(&g.guard) + cmds(&g.cmds)).sum::<usize>()
+                    1 + gs
+                        .iter()
+                        .map(|g| bexpr(&g.guard) + cmds(&g.cmds))
+                        .sum::<usize>()
                 }
             })
             .sum()
     }
     p.commands.iter().map(cmds).sum()
-
-
 }
