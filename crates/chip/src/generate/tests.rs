@@ -340,3 +340,105 @@ fn generated_commands_have_distinct_spans() {
         }
     }
 }
+
+#[test]
+fn accepted_programs_really_are_non_degenerate() {
+    use crate::generate::{analysis::Static, filter, sample};
+
+    let params = Params::default();
+    let mut checked = 0;
+    for seed in 0..60 {
+        let Ok(a) = sample(&params, seed).result else {
+            continue;
+        };
+        checked += 1;
+
+        let stat = Static::of(&a.program);
+        assert!(stat.has_loop(), "seed {seed}: no loop");
+        assert_eq!(stat.degeneracies.identity_assignments, 0, "seed {seed}");
+        assert_eq!(stat.degeneracies.constant_guards, 0, "seed {seed}");
+
+        let states = a.metrics.reachable_states.expect("accepted, so explored");
+        assert!(states >= params.state_bounds.min as usize, "seed {seed}");
+        assert!(states <= params.state_bounds.max as usize, "seed {seed}");
+        if let Some(k) = a.metrics.loop_iterations {
+            assert!(
+                k >= params.min_loop_iterations as usize,
+                "seed {seed}: busiest loop ran {k} time(s)"
+            );
+        }
+
+        let src = a.program.to_string();
+        let reparsed = parse_ltl_program(&src).unwrap_or_else(|e| {
+            panic!("seed {seed}: accepted program does not parse:\n{src}\n{e:?}")
+        });
+        assert!(filter::analyse(&reparsed, &params).accepted());
+    }
+    assert!(checked > 0, "rejection sampling accepted nothing at all");
+}
+
+#[test]
+fn rejection_sampling_is_reproducible() {
+    use crate::generate::sample;
+
+    let params = Params::default();
+    for seed in 0..20 {
+        let a = sample(&params, seed).result;
+        let b = sample(&params, seed).result;
+        assert_eq!(
+            a.map(|x| (x.seed, x.program.to_string())),
+            b.map(|x| (x.seed, x.program.to_string())),
+            "seed {seed}"
+        );
+    }
+}
+
+#[test]
+fn stats_add_up() {
+    use crate::generate::survey;
+
+    let stats = survey(&Params::default(), 0..300);
+    assert_eq!(stats.candidates, 300);
+    let rejected: usize = stats.first_failure.values().sum();
+    assert_eq!(
+        stats.accepted + rejected,
+        stats.candidates,
+        "every candidate is either accepted or has exactly one first reason"
+    );
+    for (r, any) in &stats.any_failure {
+        let first = stats.first_failure.get(r).copied().unwrap_or(0);
+        assert!(*any >= first, "{r:?}: any {any} < first {first}");
+    }
+}
+
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m4_report() {
+    use crate::generate::survey;
+
+    for (name, params) in presets() {
+        println!("{}", survey(&params, 0..1000).report(name));
+        println!();
+    }
+}
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m4_sampling_yield() {
+    use crate::generate::sample;
+
+    for (name, params) in presets() {
+        let (mut ok, mut attempts) = (0usize, 0usize);
+        for seed in 0..200 {
+            let s = sample(&params, seed);
+            attempts += s.stats.candidates;
+            if s.result.is_ok() {
+                ok += 1;
+            }
+        }
+        println!(
+            "{name}: {ok}/200 seeds yielded a program ({:.1} %), {:.1} candidates drawn per seed",
+            100.0 * ok as f64 / 200.0,
+            attempts as f64 / 200.0,
+        );
+    }
+}

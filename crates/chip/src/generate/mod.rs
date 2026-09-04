@@ -15,7 +15,13 @@ use rand::{Rng, SeedableRng, rngs::SmallRng};
 
 use crate::{
     ast::{LTLProgram, Variable},
-    generate::{budget::Budget, expr::Ctx, params::Params},
+    generate::{
+        budget::Budget,
+        expr::Ctx,
+        filter::{Analysis, Metrics},
+        params::Params,
+        stats::Stats,
+    },
 };
 
 // generating a program from a seed
@@ -97,4 +103,97 @@ pub fn node_count(p: &LTLProgram) -> usize {
             .sum()
     }
     p.commands.iter().map(cmds).sum()
+}
+
+//  rejection sampling
+pub struct Accepted {
+    // the seed that actually produced it
+    pub seed: u64,
+    pub program: LTLProgram,
+    pub metrics: Metrics,
+    // # candidates were drawn including this one
+    pub attempts: u32,
+}
+
+// rejection sampling ran out of attempts
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exhausted {
+    pub attempts: u32,
+    // the last candidate's verdict
+    pub last: Option<Analysis>,
+}
+
+impl std::fmt::Debug for Accepted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Accepted")
+            .field("seed", &self.seed)
+            .field("attempts", &self.attempts)
+            .field("metrics", &self.metrics)
+            .field("program", &format_args!("{}", self.program))
+            .finish()
+    }
+}
+
+// the outcome of one call to [`sample`]
+#[derive(Debug)]
+pub struct Sample {
+    pub result: Result<Accepted, Exhausted>,
+    pub stats: Stats,
+}
+
+// draw candidates from seed until one passes the filter or max_attempts runs out
+pub fn sample(params: &Params, seed: u64) -> Sample {
+    let mut stats = Stats::default();
+    let mut last = None;
+
+    for attempt in 0..params.max_attempts.max(1) {
+        let s = attempt_seed(seed, attempt);
+        let p = program(params, s);
+        let a = filter::analyse(&p, params);
+        stats.record(s, &a);
+
+        if a.accepted() {
+            return Sample {
+                result: Ok(Accepted {
+                    seed: s,
+                    program: p,
+                    metrics: a.metrics,
+                    attempts: attempt + 1,
+                }),
+                stats,
+            };
+        }
+        last = Some(a);
+    }
+
+    Sample {
+        result: Err(Exhausted {
+            attempts: params.max_attempts.max(1),
+            last,
+        }),
+        stats,
+    }
+}
+
+// the common case an accepted program or nothing
+pub fn accepted_program(params: &Params, seed: u64) -> Option<Accepted> {
+    sample(params, seed).result.ok()
+}
+
+// analyse exactly one candidate per seed — no resampling
+pub fn survey(params: &Params, seeds: impl IntoIterator<Item = u64>) -> Stats {
+    let mut stats = Stats::default();
+    for seed in seeds {
+        let p = program(params, seed);
+        stats.record(seed, &filter::analyse(&p, params));
+    }
+    stats
+}
+
+// SplitMix64 — a full-period mixer so distinct `(seed, attempt)` pairs almost never collide and successive attempts are uncorrelated
+fn attempt_seed(seed: u64, attempt: u32) -> u64 {
+    let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15u64.wrapping_mul(attempt as u64 + 1));
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
