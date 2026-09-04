@@ -36,9 +36,11 @@ pub fn commands<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Commands<
 }
 
 pub fn command<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Command<(), ()> {
+    //  before the children are generated so a commands program point is always smaller than its descendants    .
+    let span = cx.fresh_span();
     let w = &cx.params.w_cmd;
     let recur = if budget.exhausted() { 0.0 } else { 1.0 };
-    // A branch is only offered when at least one complete guard fits
+    // a branch is only offered when at least one complete guard fits
     let afford = if budget.size_left() >= MIN_GUARD + 1 {
         1.0
     } else {
@@ -69,7 +71,7 @@ pub fn command<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Command<()
 
     Command {
         kind,
-        span: no_span(),
+        span,
         pre: (),
         post: (),
     }
@@ -89,12 +91,13 @@ pub fn guards<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Vec<Guard<(
 }
 
 pub fn guard<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Guard<(), ()> {
+    let guard_span = cx.fresh_span();
     let g = {
         let mut e = budget.with_reserve(cx.params.max_depth_expr, MIN_ITEM);
         expr::bexpr(cx, &mut e, rng)
     };
     Guard {
-        guard_span: no_span(),
+        guard_span,
         guard: g,
         cmds: commands(cx, budget, rng),
     }

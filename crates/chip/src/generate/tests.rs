@@ -300,3 +300,43 @@ fn referenced_names(p: &LTLProgram) -> Vec<String> {
     out.dedup();
     out
 }
+
+// the acceptance filter
+
+#[test]
+fn generated_commands_have_distinct_spans() {
+    use crate::ast::Command;
+
+    for (name, params) in presets() {
+        for seed in 0..200 {
+            let p = program(&params, seed);
+            let mut spans = Vec::new();
+            for cs in &p.commands {
+                collect_spans(cs, &mut spans);
+            }
+            let mut sorted = spans.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(
+                spans.len(),
+                sorted.len(),
+                "[{name}/{seed}] two commands share a program point"
+            );
+        }
+    }
+
+    fn collect_spans(cs: &Commands<(), ()>, out: &mut Vec<crate::parse::SourceSpan>) {
+        for c in &cs.0 {
+            let c: &Command<(), ()> = c;
+            out.push(c.span);
+            match &c.kind {
+                CommandKind::If(gs) | CommandKind::Loop(_, gs) => {
+                    for g in gs {
+                        collect_spans(&g.cmds, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}

@@ -1,19 +1,34 @@
+use std::cell::Cell;
+
 use rand::{Rng, seq::IndexedRandom};
 
 use crate::{
     ast::{AExpr, AOp, BExpr, Function, LogicOp, RelOp, Target, Variable},
     generate::{budget::Budget, params::Params},
+    parse::SourceSpan,
 };
 
 pub struct Ctx<'a> {
     pub params: &'a Params,
     pub vars: &'a [Variable],
+    // counter behind [`Ctx::fresh_span`]
+    next_point: Cell<usize>,
 }
 
 impl<'a> Ctx<'a> {
     pub fn new(params: &'a Params, vars: &'a [Variable]) -> Self {
         debug_assert!(!vars.is_empty(), "Γ must be non-empty");
-        Ctx { params, vars }
+        Ctx {
+            params,
+            vars,
+            next_point: Cell::new(0),
+        }
+    }
+
+    pub fn fresh_span(&self) -> SourceSpan {
+        let i = self.next_point.get();
+        self.next_point.set(i + 1);
+        SourceSpan::from((i, 1))
     }
 }
 
@@ -24,7 +39,7 @@ pub(crate) fn pick<R: Rng>(alts: &[(f32, u8)], rng: &mut R) -> u8 {
     }
 }
 
-/// generating an arithmetic expression
+// generating an arithmetic expression
 pub fn aexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> AExpr {
     let w = &cx.params.w_aexpr;
     let decay = if budget.exhausted() {
@@ -70,7 +85,7 @@ pub fn aexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> AExpr {
     }
 }
 
-/// genrating a Boolean expression using guard
+// genrating a Boolean expression using guard
 pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
     let w = &cx.params.w_bexpr;
     let decay = if budget.exhausted() {
@@ -152,7 +167,7 @@ fn nonzero_literal<R: Rng>(cx: &Ctx, rng: &mut R) -> AExpr {
     AExpr::Number(if n == 0 { 1 } else { n })
 }
 
-/// the function application
+// the function application
 fn function<R: Rng>(cx: &Ctx, rng: &mut R) -> Function {
     fn small<R: Rng>(rng: &mut R) -> Box<AExpr> {
         Box::new(AExpr::Number(rng.random_range(0..=5)))
