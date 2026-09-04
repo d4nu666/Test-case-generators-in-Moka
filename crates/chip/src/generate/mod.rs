@@ -5,6 +5,7 @@ pub mod expr;
 pub mod filter;
 pub mod names;
 pub mod params;
+pub mod stats;
 
 #[cfg(test)]
 mod tests;
