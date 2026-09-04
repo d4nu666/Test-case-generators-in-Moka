@@ -3,9 +3,33 @@ use rand::{Rng, seq::SliceRandom};
 use crate::ast::Variable;
 
 pub const RESERVED: &[&str] = &[
-    "F", "G", "U", "X", "check", "division", "do", "exists", "exp", "fac", "false", "fi", "fib",
-    "forall", "if", "init", "max", "min", "od", "old", "par", "placeholder", "rap", "skip",
-    "stuck", "terminated", "true",
+    "F",
+    "G",
+    "U",
+    "X",
+    "check",
+    "division",
+    "do",
+    "exists",
+    "exp",
+    "fac",
+    "false",
+    "fi",
+    "fib",
+    "forall",
+    "if",
+    "init",
+    "max",
+    "min",
+    "od",
+    "old",
+    "par",
+    "placeholder",
+    "rap",
+    "skip",
+    "stuck",
+    "terminated",
+    "true",
 ];
 
 const POOL: &[&str] = &[
@@ -24,8 +48,6 @@ pub fn pick_names<R: Rng>(n: usize, rng: &mut R) -> Vec<Variable> {
         .map(|s| Variable(s.to_string()))
         .collect()
 }
-
-
 
 pub fn max_vars() -> usize {
     POOL.len()

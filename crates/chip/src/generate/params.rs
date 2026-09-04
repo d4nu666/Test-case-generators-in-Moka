@@ -34,7 +34,12 @@ pub struct CmdWeights {
 
 impl Default for CmdWeights {
     fn default() -> Self {
-        Self { assign: 1.0, skip: 0.15, if_: 0.5, loop_: 0.6 }
+        Self {
+            assign: 1.0,
+            skip: 0.15,
+            if_: 0.5,
+            loop_: 0.6,
+        }
     }
 }
 
@@ -49,7 +54,13 @@ pub struct AExprWeights {
 
 impl Default for AExprWeights {
     fn default() -> Self {
-        Self { number: 0.4, reference: 0.8, binary: 0.6, neg: 0.1, function: 0.0 }
+        Self {
+            number: 0.4,
+            reference: 0.8,
+            binary: 0.6,
+            neg: 0.1,
+            function: 0.0,
+        }
     }
 }
 
@@ -64,7 +75,13 @@ pub struct BExprWeights {
 
 impl Default for BExprWeights {
     fn default() -> Self {
-        Self { rel: 1.0, and: 0.3, or: 0.3, not: 0.15, constant: 0.05 }
+        Self {
+            rel: 1.0,
+            and: 0.3,
+            or: 0.3,
+            not: 0.15,
+            constant: 0.05,
+        }
     }
 }
 
@@ -89,9 +106,15 @@ pub struct Params {
     pub int_range: Bounds,
     pub init_range: Bounds,
 
+    // acceptance filter (level 3)
     pub state_bounds: Bounds,
     pub explore_fuel: u32,
     pub max_attempts: u32,
+    pub min_loop_iterations: u32,
+    pub require_loop: bool,
+    pub reject_unused_vars: bool,
+    pub reject_identity_assignments: bool,
+    pub reject_constant_guards: bool,
 }
 
 impl Default for Params {
@@ -115,15 +138,24 @@ impl Default for Params {
             state_bounds: Bounds::new(2, 200),
             explore_fuel: 5000,
             max_attempts: 100,
+            min_loop_iterations: 2,
+            require_loop: true,
+            reject_unused_vars: true,
+            reject_identity_assignments: true,
+            reject_constant_guards: true,
         }
     }
 }
 
 impl Params {
     pub fn teaching() -> Self {
-        Self { size_budget: 25, max_depth_cmd: 2, max_depth_expr: 2, ..Self::default() }
+        Self {
+            size_budget: 25,
+            max_depth_cmd: 2,
+            max_depth_expr: 2,
+            ..Self::default()
+        }
     }
-
     pub fn stress() -> Self {
         Self {
             size_budget: 400,
@@ -133,6 +165,8 @@ impl Params {
             n_guards: Bounds::new(1, 4),
             allow_division: true,
             state_bounds: Bounds::new(2, 1_000_000),
+            min_loop_iterations: 1,
+            reject_unused_vars: false,
             ..Self::default()
         }
     }

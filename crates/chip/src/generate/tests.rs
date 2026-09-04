@@ -51,7 +51,10 @@ fn different_seeds_differ() {
     let params = Params::default();
     let a = program(&params, 1).to_string();
     let b = program(&params, 2).to_string();
-    assert_ne!(a, b, "two seeds produced identical programs — is the RNG plumbed through?");
+    assert_ne!(
+        a, b,
+        "two seeds produced identical programs — is the RNG plumbed through?"
+    );
 }
 
 // budgets
@@ -102,7 +105,7 @@ fn depth_budgets_are_respected() {
     }
 }
 
-// semantic validity 
+// semantic validity
 
 #[test]
 fn every_variable_is_in_scope() {
@@ -126,14 +129,21 @@ fn no_reserved_words_as_variables() {
     for seed in 0..SEEDS {
         let p = program(&params, seed);
         for v in p.initial.keys() {
-            assert!(!names::is_reserved(&v.0), "seed {seed}: `{}` is reserved", v.0);
+            assert!(
+                !names::is_reserved(&v.0),
+                "seed {seed}: `{}` is reserved",
+                v.0
+            );
         }
     }
 }
 
 #[test]
 fn no_division_when_disabled() {
-    let params = Params { allow_division: false, ..Params::default() };
+    let params = Params {
+        allow_division: false,
+        ..Params::default()
+    };
     for seed in 0..SEEDS {
         let p = program(&params, seed);
         assert!(
@@ -216,7 +226,10 @@ fn depths(p: &LTLProgram) -> (u32, u32) {
         }
         (cmd_d, expr_d)
     }
-    p.commands.iter().map(cd).fold((0, 0), |a, b| (a.0.max(b.0), a.1.max(b.1)))
+    p.commands
+        .iter()
+        .map(cd)
+        .fold((0, 0), |a, b| (a.0.max(b.0), a.1.max(b.1)))
 }
 
 fn walk_aexprs<F: FnMut(&AExpr)>(p: &LTLProgram, f: &mut F) {
@@ -286,4 +299,146 @@ fn referenced_names(p: &LTLProgram) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+// the acceptance filter
+
+#[test]
+fn generated_commands_have_distinct_spans() {
+    use crate::ast::Command;
+
+    for (name, params) in presets() {
+        for seed in 0..200 {
+            let p = program(&params, seed);
+            let mut spans = Vec::new();
+            for cs in &p.commands {
+                collect_spans(cs, &mut spans);
+            }
+            let mut sorted = spans.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(
+                spans.len(),
+                sorted.len(),
+                "[{name}/{seed}] two commands share a program point"
+            );
+        }
+    }
+
+    fn collect_spans(cs: &Commands<(), ()>, out: &mut Vec<crate::parse::SourceSpan>) {
+        for c in &cs.0 {
+            let c: &Command<(), ()> = c;
+            out.push(c.span);
+            match &c.kind {
+                CommandKind::If(gs) | CommandKind::Loop(_, gs) => {
+                    for g in gs {
+                        collect_spans(&g.cmds, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn accepted_programs_really_are_non_degenerate() {
+    use crate::generate::{analysis::Static, filter, sample};
+
+    let params = Params::default();
+    let mut checked = 0;
+    for seed in 0..60 {
+        let Ok(a) = sample(&params, seed).result else {
+            continue;
+        };
+        checked += 1;
+
+        let stat = Static::of(&a.program);
+        assert!(stat.has_loop(), "seed {seed}: no loop");
+        assert_eq!(stat.degeneracies.identity_assignments, 0, "seed {seed}");
+        assert_eq!(stat.degeneracies.constant_guards, 0, "seed {seed}");
+
+        let states = a.metrics.reachable_states.expect("accepted, so explored");
+        assert!(states >= params.state_bounds.min as usize, "seed {seed}");
+        assert!(states <= params.state_bounds.max as usize, "seed {seed}");
+        if let Some(k) = a.metrics.loop_iterations {
+            assert!(
+                k >= params.min_loop_iterations as usize,
+                "seed {seed}: busiest loop ran {k} time(s)"
+            );
+        }
+
+        let src = a.program.to_string();
+        let reparsed = parse_ltl_program(&src).unwrap_or_else(|e| {
+            panic!("seed {seed}: accepted program does not parse:\n{src}\n{e:?}")
+        });
+        assert!(filter::analyse(&reparsed, &params).accepted());
+    }
+    assert!(checked > 0, "rejection sampling accepted nothing at all");
+}
+
+#[test]
+fn rejection_sampling_is_reproducible() {
+    use crate::generate::sample;
+
+    let params = Params::default();
+    for seed in 0..20 {
+        let a = sample(&params, seed).result;
+        let b = sample(&params, seed).result;
+        assert_eq!(
+            a.map(|x| (x.seed, x.program.to_string())),
+            b.map(|x| (x.seed, x.program.to_string())),
+            "seed {seed}"
+        );
+    }
+}
+
+#[test]
+fn stats_add_up() {
+    use crate::generate::survey;
+
+    let stats = survey(&Params::default(), 0..300);
+    assert_eq!(stats.candidates, 300);
+    let rejected: usize = stats.first_failure.values().sum();
+    assert_eq!(
+        stats.accepted + rejected,
+        stats.candidates,
+        "every candidate is either accepted or has exactly one first reason"
+    );
+    for (r, any) in &stats.any_failure {
+        let first = stats.first_failure.get(r).copied().unwrap_or(0);
+        assert!(*any >= first, "{r:?}: any {any} < first {first}");
+    }
+}
+
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m4_report() {
+    use crate::generate::survey;
+
+    for (name, params) in presets() {
+        println!("{}", survey(&params, 0..1000).report(name));
+        println!();
+    }
+}
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m4_sampling_yield() {
+    use crate::generate::sample;
+
+    for (name, params) in presets() {
+        let (mut ok, mut attempts) = (0usize, 0usize);
+        for seed in 0..200 {
+            let s = sample(&params, seed);
+            attempts += s.stats.candidates;
+            if s.result.is_ok() {
+                ok += 1;
+            }
+        }
+        println!(
+            "{name}: {ok}/200 seeds yielded a program ({:.1} %), {:.1} candidates drawn per seed",
+            100.0 * ok as f64 / 200.0,
+            attempts as f64 / 200.0,
+        );
+    }
 }
