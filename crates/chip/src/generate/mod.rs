@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod budget;
 pub mod cmd;
 pub mod expr;
+pub mod filter;
 pub mod names;
 pub mod params;
 

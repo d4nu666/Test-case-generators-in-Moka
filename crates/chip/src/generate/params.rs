@@ -106,9 +106,15 @@ pub struct Params {
     pub int_range: Bounds,
     pub init_range: Bounds,
 
+    // acceptance filter (level 3)
     pub state_bounds: Bounds,
     pub explore_fuel: u32,
     pub max_attempts: u32,
+    pub min_loop_iterations: u32,
+    pub require_loop: bool,
+    pub reject_unused_vars: bool,
+    pub reject_identity_assignments: bool,
+    pub reject_constant_guards: bool,
 }
 
 impl Default for Params {
@@ -132,6 +138,11 @@ impl Default for Params {
             state_bounds: Bounds::new(2, 200),
             explore_fuel: 5000,
             max_attempts: 100,
+            min_loop_iterations: 2,
+            require_loop: true,
+            reject_unused_vars: true,
+            reject_identity_assignments: true,
+            reject_constant_guards: true,
         }
     }
 }
@@ -145,7 +156,6 @@ impl Params {
             ..Self::default()
         }
     }
-
     pub fn stress() -> Self {
         Self {
             size_budget: 400,
@@ -155,6 +165,8 @@ impl Params {
             n_guards: Bounds::new(1, 4),
             allow_division: true,
             state_bounds: Bounds::new(2, 1_000_000),
+            min_loop_iterations: 1,
+            reject_unused_vars: false,
             ..Self::default()
         }
     }
