@@ -34,8 +34,9 @@ pub fn program(params: &Params, seed: u64) -> LTLProgram {
         .clamp(1, names::max_vars());
     let vars = names::pick_names(n, &mut rng);
 
-    let cx = Ctx::new(params, &vars);
-    let initial = initial_assignments(&cx, &mut rng);
+    // the initial section is drawn first so the context can see where each variable starts
+    let initial = initial_assignments(params, &vars, &mut rng);
+    let cx = Ctx::new(params, &vars, &initial);
 
     let mut size = params.size_budget;
     let mut budget = Budget::new(params.max_depth_cmd, &mut size);
@@ -48,16 +49,20 @@ pub fn program(params: &Params, seed: u64) -> LTLProgram {
     }
 }
 
-fn initial_assignments<R: Rng>(cx: &Ctx, rng: &mut R) -> IndexMap<Variable, i32> {
+fn initial_assignments<R: Rng>(
+    params: &Params,
+    vars: &[Variable],
+    rng: &mut R,
+) -> IndexMap<Variable, i32> {
     let mut initial = IndexMap::new();
-    for v in cx.vars {
-        if cx.params.initialise_all_vars || rng.random_bool(0.75) {
-            initial.insert(v.clone(), cx.params.init_range.sample_i32(rng));
+    for v in vars {
+        if params.initialise_all_vars || rng.random_bool(0.75) {
+            initial.insert(v.clone(), params.init_range.sample_i32(rng));
         }
     }
     if initial.is_empty() {
-        let v = cx.vars[0].clone();
-        initial.insert(v, cx.params.init_range.sample_i32(rng));
+        let v = vars[0].clone();
+        initial.insert(v, params.init_range.sample_i32(rng));
     }
     initial
 }

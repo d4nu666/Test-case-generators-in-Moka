@@ -1,5 +1,6 @@
 use std::cell::Cell;
 
+use indexmap::IndexMap;
 use rand::{Rng, seq::IndexedRandom};
 
 use crate::{
@@ -11,16 +12,21 @@ use crate::{
 pub struct Ctx<'a> {
     pub params: &'a Params,
     pub vars: &'a [Variable],
-    // counter behind [`Ctx::fresh_span`]
+    pub initial: &'a IndexMap<Variable, i32>,
     next_point: Cell<usize>,
 }
 
 impl<'a> Ctx<'a> {
-    pub fn new(params: &'a Params, vars: &'a [Variable]) -> Self {
+    pub fn new(
+        params: &'a Params,
+        vars: &'a [Variable],
+        initial: &'a IndexMap<Variable, i32>,
+    ) -> Self {
         debug_assert!(!vars.is_empty(), "Γ must be non-empty");
         Ctx {
             params,
             vars,
+            initial,
             next_point: Cell::new(0),
         }
     }
@@ -30,6 +36,11 @@ impl<'a> Ctx<'a> {
         self.next_point.set(i + 1);
         SourceSpan::from((i, 1))
     }
+
+    pub fn start_of(&self, v: &Variable) -> i32 {
+        self.initial.get(v).copied().unwrap_or(0)
+    }
+
 }
 
 pub(crate) fn pick<R: Rng>(alts: &[(f32, u8)], rng: &mut R) -> u8 {
