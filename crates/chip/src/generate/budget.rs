@@ -47,6 +47,11 @@ impl<'a> Budget<'a> {
         }
     }
 
+    // spend n nodes at once for a sub-tree emitted whole rather than drawn node by node
+    pub fn spend_n(&mut self, n: u32) {
+        *self.size = self.size.saturating_sub(n);
+    }
+
     pub fn exhausted(&self) -> bool {
         self.depth == 0 || self.size_left() == 0
     }
