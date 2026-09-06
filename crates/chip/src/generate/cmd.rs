@@ -180,6 +180,7 @@ pub fn guard<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Guard<(), ()
     }
 }
 
+
 // counter loops 
 fn counter_guards<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Vec<Guard<(), ()>> {
     let step = cx.params.loop_step.sample_i32(rng).max(1);
@@ -274,6 +275,7 @@ fn bound_relop<R: Rng>(dir: Dir, rng: &mut R) -> RelOp {
         (false, false) => RelOp::Ge,
     }
 }
+
 
 fn step_command<R: Rng>(
     cx: &Ctx,
