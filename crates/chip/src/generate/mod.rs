@@ -24,28 +24,50 @@ use crate::{
     },
 };
 
+pub struct Generated {
+    pub program: LTLProgram,
+    pub counters: IndexMap<Variable, expr::Counter>,
+}
+
 // generating a program from a seed
 pub fn program(params: &Params, seed: u64) -> LTLProgram {
+    generate(params, seed).program
+}
+
+pub fn generate(params: &Params, seed: u64) -> Generated {
     let mut rng = SmallRng::seed_from_u64(seed);
 
+    let floor = if params.counter_loops { 2 } else { 1 };
     let n = params
         .n_vars
         .sample_usize(&mut rng)
-        .clamp(1, names::max_vars());
+        .clamp(floor.min(names::max_vars()), names::max_vars());
     let vars = names::pick_names(n, &mut rng);
 
-    // the initial section is drawn first so the context can see where each variable starts
+    // the initial a counter loop places its bound relative to where its counter actually starts
     let initial = initial_assignments(params, &vars, &mut rng);
-    let cx = Ctx::new(params, &vars, &initial);
 
-    let mut size = params.size_budget;
-    let mut budget = Budget::new(params.max_depth_cmd, &mut size);
-    let commands = vec![cmd::top_level(&cx, &mut budget, &mut rng)];
+    // cx borrows initial so it lives in its own scope and hands back only what the caller needs
+    let (commands, counters) = {
+        let cx = Ctx::new(params, &vars, &initial);
+        if params.counter_loops {
+            // reserved before a single command exists so no random assignment can ever have written a counter
+            cx.reserve_counters(1, &mut rng);
+        }
+        let mut size = params.size_budget;
+        let mut budget = Budget::new(params.max_depth_cmd, &mut size);
+        let commands = vec![cmd::top_level(&cx, &mut budget, &mut rng)];
+        let counters = cx.counters();
+        (commands, counters)
+    };
 
-    LTLProgram {
-        initial,
-        commands,
-        properties: Vec::new(),
+    Generated {
+        program: LTLProgram {
+            initial,
+            commands,
+            properties: Vec::new(),
+        },
+        counters,
     }
 }
 

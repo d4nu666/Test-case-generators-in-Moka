@@ -118,6 +118,10 @@ pub struct Params {
 
     pub repair_identity_assignments: bool,
     pub guarantee_loop: bool,
+    pub counter_loops: bool,
+    pub loop_trip_count: Bounds,
+    pub loop_step: Bounds,
+    pub p_guard_conjunct: f64,
 }
 
 impl Default for Params {
@@ -148,6 +152,10 @@ impl Default for Params {
             reject_constant_guards: true,
             repair_identity_assignments: true,
             guarantee_loop: true,
+            counter_loops: true,
+            loop_trip_count: Bounds::new(2, 6),
+            loop_step: Bounds::new(1, 2),
+            p_guard_conjunct: 0.35,
         }
     }
 }
@@ -180,6 +188,7 @@ impl Params {
         Self {
             repair_identity_assignments: false,
             guarantee_loop: false,
+            counter_loops: false,
             ..Self::default()
         }
     }
@@ -188,6 +197,7 @@ impl Params {
         Self {
             repair_identity_assignments: false,
             guarantee_loop: false,
+            counter_loops: false,
             ..self.clone()
         }
     }

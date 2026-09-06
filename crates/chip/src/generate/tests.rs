@@ -456,6 +456,82 @@ fn every_program_has_a_top_level_loop() {
 }
 
 #[test]
+fn counters_are_only_ever_stepped() {
+    use crate::ast::AOp;
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let g = crate::generate::generate(&params, seed);
+            let p = &g.program;
+            for cs in &p.commands {
+                walk_cmds(cs, &mut |k| {
+                    if let CommandKind::Assignment(Target::Variable(v), e) = k
+                        && let Some(c) = g.counters.get(v)
+                    {
+                        let want = if c.dir >= 0 { AOp::Plus } else { AOp::Minus };
+                        let stepped = matches!(
+                            e,
+                            AExpr::Binary(l, op, r)
+                                if *op == want
+                                    && matches!(&**l, AExpr::Reference(Target::Variable(w)) if w == v)
+                                    && matches!(&**r, AExpr::Number(k) if *k > 0)
+                        );
+                        assert!(
+                            stepped,
+                            "[{name}/{seed}] counter `{v}` (dir {}) is assigned \
+                             something other than a step in its own direction:\n{p}",
+                            c.dir
+                        );
+                    }
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn no_generated_program_diverges() {
+    use crate::generate::{filter, filter::Class};
+
+    let params = Params::default();
+    for seed in 0..200 {
+        let p = program(&params, seed);
+        let a = filter::analyse(&p, &params);
+        if a.exploded() || a.panicked() {
+            continue; // no verdict was reached, so nothing to assert
+        }
+        assert_ne!(
+            a.metrics.class,
+            Some(Class::Diverges),
+            "seed {seed}: counter loops are supposed to be well-founded:\n{p}"
+        );
+    }
+}
+
+#[test]
+fn every_counter_is_read_and_written() {
+    use crate::generate::analysis::Static;
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let g = crate::generate::generate(&params, seed);
+            let s = Static::of(&g.program);
+            for v in g.counters.keys() {
+                assert!(
+                    s.usage.read.contains(v),
+                    "[{name}/{seed}] counter `{v}` is never read:\n{}",
+                    g.program
+                );
+                assert!(
+                    s.usage.written.contains(v),
+                    "[{name}/{seed}] counter `{v}` is never written:\n{}",
+                    g.program
+                );
+            }
+        }
+    }
+}
+#[test]
 #[ignore = "reporting run, not an assertion"]
 fn m4_sampling_yield() {
     use crate::generate::sample;

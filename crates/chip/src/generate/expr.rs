@@ -1,7 +1,7 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use indexmap::IndexMap;
-use rand::{Rng, seq::IndexedRandom};
+use rand::{Rng, seq::IndexedRandom, seq::SliceRandom};
 
 use crate::{
     ast::{AExpr, AOp, BExpr, Function, LogicOp, RelOp, Target, Variable},
@@ -9,11 +9,22 @@ use crate::{
     parse::SourceSpan,
 };
 
+pub type Dir = i32;
+
+// variable reserved to drive loops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Counter {
+    pub dir: Dir,
+    pub bound: i32,
+    pub claims: usize,
+}
+
 pub struct Ctx<'a> {
     pub params: &'a Params,
     pub vars: &'a [Variable],
     pub initial: &'a IndexMap<Variable, i32>,
     next_point: Cell<usize>,
+    counters: RefCell<IndexMap<Variable, Counter>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -28,6 +39,7 @@ impl<'a> Ctx<'a> {
             vars,
             initial,
             next_point: Cell::new(0),
+            counters: RefCell::new(IndexMap::new()),
         }
     }
 
@@ -37,10 +49,58 @@ impl<'a> Ctx<'a> {
         SourceSpan::from((i, 1))
     }
 
+    pub fn is_counter(&self, v: &Variable) -> bool {
+        self.counters.borrow().contains_key(v)
+    }
+
+    pub fn counters(&self) -> IndexMap<Variable, Counter> {
+        self.counters
+            .borrow()
+            .iter()
+            .filter(|(_, c)| c.claims > 0)
+            .map(|(v, c)| (v.clone(), *c))
+            .collect()
+    }
+
     pub fn start_of(&self, v: &Variable) -> i32 {
         self.initial.get(v).copied().unwrap_or(0)
     }
 
+    pub fn reserve_counters<R: Rng>(&self, k: usize, rng: &mut R) {
+        let room = self.vars.len().saturating_sub(1);
+        let k = k.min(room);
+        let mut chosen: Vec<&Variable> = self.vars.iter().collect();
+        chosen.shuffle(rng);
+        let mut counters = self.counters.borrow_mut();
+        for v in chosen.into_iter().take(k) {
+            let dir: Dir = if rng.random_bool(0.5) { 1 } else { -1 };
+            counters.insert(
+                v.clone(),
+                Counter {
+                    dir,
+                    bound: self.initial.get(v).copied().unwrap_or(0),
+                    claims: 0,
+                },
+            );
+        }
+    }
+
+    pub fn claim_counter<R: Rng>(
+        &self,
+        step: i32,
+        trips: i32,
+        rng: &mut R,
+    ) -> Option<(Variable, Dir, i32)> {
+        let pool: Vec<Variable> = self.counters.borrow().keys().cloned().collect();
+        let v = pool.choose(rng)?.clone();
+        let mut counters = self.counters.borrow_mut();
+        let c = counters.get_mut(&v).expect("just picked from the pool");
+        c.claims += 1;
+        c.bound = c
+            .bound
+            .saturating_add(c.dir.saturating_mul(step.saturating_mul(trips)));
+        Some((v, c.dir, c.bound))
+    }
 }
 
 pub(crate) fn pick<R: Rng>(alts: &[(f32, u8)], rng: &mut R) -> u8 {
@@ -148,6 +208,17 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
 
 pub fn target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
     Target::Variable(cx.vars.choose(rng).expect("Γ is non-empty").clone())
+}
+
+pub fn assign_target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
+    if !cx.params.counter_loops {
+        return target(cx, rng);
+    }
+    let free: Vec<&Variable> = cx.vars.iter().filter(|v| !cx.is_counter(v)).collect();
+    match free.choose(rng) {
+        Some(v) => Target::Variable((*v).clone()),
+        None => target(cx, rng),
+    }
 }
 
 fn is_identity(t: &Target<Box<AExpr>>, e: &AExpr) -> bool {
