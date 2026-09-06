@@ -150,6 +150,37 @@ pub fn target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
     Target::Variable(cx.vars.choose(rng).expect("Γ is non-empty").clone())
 }
 
+fn is_identity(t: &Target<Box<AExpr>>, e: &AExpr) -> bool {
+    match (t, e) {
+        (Target::Variable(a), AExpr::Reference(Target::Variable(b))) => a == b,
+        _ => false,
+    }
+}
+
+pub fn repair_identity<R: Rng>(
+    cx: &Ctx,
+    budget: &mut Budget,
+    rng: &mut R,
+    t: &Target<Box<AExpr>>,
+    e: AExpr,
+) -> AExpr {
+    if !is_identity(t, &e) {
+        return e;
+    }
+    if budget.size_left() >= 2 {
+        budget.spend_n(2);
+        let op = if rng.random_bool(0.5) {
+            AOp::Plus
+        } else {
+            AOp::Minus
+        };
+        let k = rng.random_range(1..=3);
+        AExpr::Binary(Box::new(e), op, Box::new(AExpr::Number(k)))
+    } else {
+        AExpr::Number(cx.params.int_range.sample_i32(rng))
+    }
+}
+
 pub fn aop<R: Rng>(cx: &Ctx, rng: &mut R) -> AOp {
     let alts: &[AOp] = if cx.params.allow_division {
         &[AOp::Plus, AOp::Minus, AOp::Times, AOp::Divide]

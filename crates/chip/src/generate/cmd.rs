@@ -13,6 +13,7 @@ use crate::{
 const MIN_ITEM: u32 = 2;
 
 const MIN_GUARD: u32 = 5;
+
 pub fn no_span() -> SourceSpan {
     SourceSpan::from((0, 0))
 }
@@ -59,11 +60,7 @@ pub fn command<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Command<()
     budget.spend();
 
     let kind = match tag {
-        0 => {
-            let t = expr::target(cx, rng);
-            let mut e = budget.with_depth(cx.params.max_depth_expr);
-            CommandKind::Assignment(t, expr::aexpr(cx, &mut e, rng))
-        }
+        0 => assignment(cx, budget, rng),
         1 => CommandKind::Skip,
         2 => CommandKind::If(guards(cx, budget, rng)),
         _ => CommandKind::Loop((), guards(cx, budget, rng)),
@@ -75,6 +72,21 @@ pub fn command<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Command<()
         pre: (),
         post: (),
     }
+}
+
+//a random assignment with the identity repair applied
+fn assignment<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> CommandKind<(), ()> {
+    let t = expr::target(cx, rng);
+    let rhs = {
+        let mut e = budget.with_depth(cx.params.max_depth_expr);
+        expr::aexpr(cx, &mut e, rng)
+    };
+    let rhs = if cx.params.repair_identity_assignments {
+        expr::repair_identity(cx, budget, rng, &t, rhs)
+    } else {
+        rhs
+    };
+    CommandKind::Assignment(t, rhs)
 }
 
 pub fn guards<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Vec<Guard<(), ()>> {
@@ -102,3 +114,4 @@ pub fn guard<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Guard<(), ()
         cmds: commands(cx, budget, rng),
     }
 }
+

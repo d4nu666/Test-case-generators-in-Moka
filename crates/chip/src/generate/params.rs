@@ -115,6 +115,8 @@ pub struct Params {
     pub reject_unused_vars: bool,
     pub reject_identity_assignments: bool,
     pub reject_constant_guards: bool,
+
+    pub repair_identity_assignments: bool,
 }
 
 impl Default for Params {
@@ -143,6 +145,7 @@ impl Default for Params {
             reject_unused_vars: true,
             reject_identity_assignments: true,
             reject_constant_guards: true,
+            repair_identity_assignments: true,
         }
     }
 }
@@ -168,6 +171,20 @@ impl Params {
             min_loop_iterations: 1,
             reject_unused_vars: false,
             ..Self::default()
+        }
+    }
+
+    pub fn naive() -> Self {
+        Self {
+            repair_identity_assignments: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn without_repairs(&self) -> Self {
+        Self {
+            repair_identity_assignments: false,
+            ..self.clone()
         }
     }
 }

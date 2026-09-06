@@ -421,6 +421,23 @@ fn m4_report() {
         println!();
     }
 }
+
+#[test]
+fn no_identity_assignment_is_ever_emitted() {
+    use crate::generate::analysis::Static;
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            assert_eq!(
+                Static::of(&p).degeneracies.identity_assignments,
+                0,
+                "[{name}/{seed}] identity assignment survived the repair:\n{p}"
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "reporting run, not an assertion"]
 fn m4_sampling_yield() {
@@ -442,3 +459,4 @@ fn m4_sampling_yield() {
         );
     }
 }
+
