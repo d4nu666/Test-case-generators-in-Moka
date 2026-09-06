@@ -1,6 +1,7 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
-use rand::{Rng, seq::IndexedRandom};
+use indexmap::{IndexMap, IndexSet};
+use rand::{Rng, seq::IndexedRandom, seq::SliceRandom};
 
 use crate::{
     ast::{AExpr, AOp, BExpr, Function, LogicOp, RelOp, Target, Variable},
@@ -8,20 +9,39 @@ use crate::{
     parse::SourceSpan,
 };
 
+pub type Dir = i32;
+
+// variable reserved to drive loops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Counter {
+    pub dir: Dir,
+    pub bound: i32,
+    pub claims: usize,
+}
+
 pub struct Ctx<'a> {
     pub params: &'a Params,
     pub vars: &'a [Variable],
-    // counter behind [`Ctx::fresh_span`]
+    pub initial: &'a IndexMap<Variable, i32>,
     next_point: Cell<usize>,
+    counters: RefCell<IndexMap<Variable, Counter>>,
+    read: RefCell<IndexSet<Variable>>,
 }
 
 impl<'a> Ctx<'a> {
-    pub fn new(params: &'a Params, vars: &'a [Variable]) -> Self {
+    pub fn new(
+        params: &'a Params,
+        vars: &'a [Variable],
+        initial: &'a IndexMap<Variable, i32>,
+    ) -> Self {
         debug_assert!(!vars.is_empty(), "Γ must be non-empty");
         Ctx {
             params,
             vars,
+            initial,
             next_point: Cell::new(0),
+            counters: RefCell::new(IndexMap::new()),
+            read: RefCell::new(IndexSet::new()),
         }
     }
 
@@ -29,6 +49,77 @@ impl<'a> Ctx<'a> {
         let i = self.next_point.get();
         self.next_point.set(i + 1);
         SourceSpan::from((i, 1))
+    }
+
+    pub fn is_counter(&self, v: &Variable) -> bool {
+        self.counters.borrow().contains_key(v)
+    }
+
+    pub fn counters(&self) -> IndexMap<Variable, Counter> {
+        self.counters
+            .borrow()
+            .iter()
+            .filter(|(_, c)| c.claims > 0)
+            .map(|(v, c)| (v.clone(), *c))
+            .collect()
+    }
+
+    fn note_read(&self, v: &Variable) {
+        self.read.borrow_mut().insert(v.clone());
+    }
+
+    // choosing a variable to read preferring one nothing has read yet (i need to solve this shit bug)
+    fn pick_read<R: Rng>(&self, rng: &mut R) -> Variable {
+        if self.params.prefer_unread_variables && rng.random_bool(0.8) {
+            let read = self.read.borrow();
+            let unread: Vec<&Variable> = self.vars.iter().filter(|v| !read.contains(*v)).collect();
+            if let Some(v) = unread.choose(rng) {
+                return (*v).clone();
+            }
+        }
+        self.vars.choose(rng).expect("Γ is non-empty").clone()
+    }
+
+    pub fn start_of(&self, v: &Variable) -> i32 {
+        self.initial.get(v).copied().unwrap_or(0)
+    }
+
+    pub fn reserve_counters<R: Rng>(&self, k: usize, rng: &mut R) {
+        let room = self.vars.len().saturating_sub(1);
+        let k = k.min(room);
+        let mut chosen: Vec<&Variable> = self.vars.iter().collect();
+        chosen.shuffle(rng);
+        let mut counters = self.counters.borrow_mut();
+        for v in chosen.into_iter().take(k) {
+            let dir: Dir = if rng.random_bool(0.5) { 1 } else { -1 };
+            counters.insert(
+                v.clone(),
+                Counter {
+                    dir,
+                    bound: self.initial.get(v).copied().unwrap_or(0),
+                    claims: 0,
+                },
+            );
+        }
+    }
+
+    pub fn claim_counter<R: Rng>(
+        &self,
+        step: i32,
+        trips: i32,
+        rng: &mut R,
+    ) -> Option<(Variable, Dir, i32)> {
+        let pool: Vec<Variable> = self.counters.borrow().keys().cloned().collect();
+        let v = pool.choose(rng)?.clone();
+        let mut counters = self.counters.borrow_mut();
+        let c = counters.get_mut(&v).expect("just picked from the pool");
+        c.claims += 1;
+        // the guard this counter is about to appear in reads it
+        self.read.borrow_mut().insert(v.clone());
+        c.bound = c
+            .bound
+            .saturating_add(c.dir.saturating_mul(step.saturating_mul(trips)));
+        Some((v, c.dir, c.bound))
     }
 }
 
@@ -136,7 +227,51 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
 }
 
 pub fn target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
-    Target::Variable(cx.vars.choose(rng).expect("Γ is non-empty").clone())
+    let v = cx.pick_read(rng);
+    cx.note_read(&v);
+    Target::Variable(v)
+}
+
+pub fn assign_target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
+    if !cx.params.counter_loops {
+        return target(cx, rng);
+    }
+    let free: Vec<&Variable> = cx.vars.iter().filter(|v| !cx.is_counter(v)).collect();
+    match free.choose(rng) {
+        Some(v) => Target::Variable((*v).clone()),
+        None => target(cx, rng),
+    }
+}
+
+fn is_identity(t: &Target<Box<AExpr>>, e: &AExpr) -> bool {
+    match (t, e) {
+        (Target::Variable(a), AExpr::Reference(Target::Variable(b))) => a == b,
+        _ => false,
+    }
+}
+
+pub fn repair_identity<R: Rng>(
+    cx: &Ctx,
+    budget: &mut Budget,
+    rng: &mut R,
+    t: &Target<Box<AExpr>>,
+    e: AExpr,
+) -> AExpr {
+    if !is_identity(t, &e) {
+        return e;
+    }
+    if budget.size_left() >= 2 {
+        budget.spend_n(2);
+        let op = if rng.random_bool(0.5) {
+            AOp::Plus
+        } else {
+            AOp::Minus
+        };
+        let k = rng.random_range(1..=3);
+        AExpr::Binary(Box::new(e), op, Box::new(AExpr::Number(k)))
+    } else {
+        AExpr::Number(cx.params.int_range.sample_i32(rng))
+    }
 }
 
 pub fn aop<R: Rng>(cx: &Ctx, rng: &mut R) -> AOp {

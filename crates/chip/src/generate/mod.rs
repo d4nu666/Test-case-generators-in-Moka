@@ -24,40 +24,67 @@ use crate::{
     },
 };
 
+pub struct Generated {
+    pub program: LTLProgram,
+    pub counters: IndexMap<Variable, expr::Counter>,
+}
+
 // generating a program from a seed
 pub fn program(params: &Params, seed: u64) -> LTLProgram {
+    generate(params, seed).program
+}
+
+pub fn generate(params: &Params, seed: u64) -> Generated {
     let mut rng = SmallRng::seed_from_u64(seed);
 
+    let floor = if params.counter_loops { 2 } else { 1 };
     let n = params
         .n_vars
         .sample_usize(&mut rng)
-        .clamp(1, names::max_vars());
+        .clamp(floor.min(names::max_vars()), names::max_vars());
     let vars = names::pick_names(n, &mut rng);
 
-    let cx = Ctx::new(params, &vars);
-    let initial = initial_assignments(&cx, &mut rng);
+    // the initial a counter loop places its bound relative to where its counter actually starts
+    let initial = initial_assignments(params, &vars, &mut rng);
 
-    let mut size = params.size_budget;
-    let mut budget = Budget::new(params.max_depth_cmd, &mut size);
-    let commands = vec![cmd::commands(&cx, &mut budget, &mut rng)];
+    // cx borrows initial so it lives in its own scope and hands back only what the caller needs
+    let (commands, counters) = {
+        let cx = Ctx::new(params, &vars, &initial);
+        if params.counter_loops {
+            // reserved before a single command exists so no random assignment can ever have written a counter
+            cx.reserve_counters(1, &mut rng);
+        }
+        let mut size = params.size_budget;
+        let mut budget = Budget::new(params.max_depth_cmd, &mut size);
+        let commands = vec![cmd::top_level(&cx, &mut budget, &mut rng)];
+        let counters = cx.counters();
+        (commands, counters)
+    };
 
-    LTLProgram {
-        initial,
-        commands,
-        properties: Vec::new(),
+    Generated {
+        program: LTLProgram {
+            initial,
+            commands,
+            properties: Vec::new(),
+        },
+        counters,
     }
 }
 
-fn initial_assignments<R: Rng>(cx: &Ctx, rng: &mut R) -> IndexMap<Variable, i32> {
+fn initial_assignments<R: Rng>(
+    params: &Params,
+    vars: &[Variable],
+    rng: &mut R,
+) -> IndexMap<Variable, i32> {
     let mut initial = IndexMap::new();
-    for v in cx.vars {
-        if cx.params.initialise_all_vars || rng.random_bool(0.75) {
-            initial.insert(v.clone(), cx.params.init_range.sample_i32(rng));
+    for v in vars {
+        if params.initialise_all_vars || rng.random_bool(0.75) {
+            initial.insert(v.clone(), params.init_range.sample_i32(rng));
         }
     }
     if initial.is_empty() {
-        let v = cx.vars[0].clone();
-        initial.insert(v, cx.params.init_range.sample_i32(rng));
+        let v = vars[0].clone();
+        initial.insert(v, params.init_range.sample_i32(rng));
     }
     initial
 }

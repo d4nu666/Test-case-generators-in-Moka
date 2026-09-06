@@ -421,6 +421,181 @@ fn m4_report() {
         println!();
     }
 }
+
+
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m45_report() {
+    use crate::generate::survey;
+
+    for (name, params) in presets() {
+        println!(
+            "{}",
+            survey(&params.without_repairs(), 0..1000).report(&format!("{name} (naive)"))
+        );
+        println!();
+        println!(
+            "{}",
+            survey(&params, 0..1000).report(&format!("{name} (repaired)"))
+        );
+        println!();
+    }
+}
+
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m45_sampling_yield() {
+    use crate::generate::sample;
+
+    for (name, params) in presets() {
+        for (label, p) in [("naive", params.without_repairs()), ("repaired", params)] {
+            let (mut ok, mut attempts) = (0usize, 0usize);
+            for seed in 0..200 {
+                let s = sample(&p, seed);
+                attempts += s.stats.candidates;
+                if s.result.is_ok() {
+                    ok += 1;
+                }
+            }
+            println!(
+                "{name}/{label}: {ok}/200 seeds yielded a program ({:.1} %), \
+                 {:.1} candidates drawn per seed",
+                100.0 * ok as f64 / 200.0,
+                attempts as f64 / 200.0,
+            );
+        }
+    }
+}
+
+#[test]
+fn no_identity_assignment_is_ever_emitted() {
+    use crate::generate::analysis::Static;
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            assert_eq!(
+                Static::of(&p).degeneracies.identity_assignments,
+                0,
+                "[{name}/{seed}] identity assignment survived the repair:\n{p}"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_program_has_a_top_level_loop() {
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            let top_level_loop = p
+                .commands
+                .iter()
+                .any(|cs| cs.0.iter().any(|c| matches!(c.kind, CommandKind::Loop(..))));
+            assert!(
+                top_level_loop,
+                "[{name}/{seed}] guarantee_loop did not produce one:\n{p}"
+            );
+        }
+    }
+}
+
+#[test]
+fn counters_are_only_ever_stepped() {
+    use crate::ast::AOp;
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let g = crate::generate::generate(&params, seed);
+            let p = &g.program;
+            for cs in &p.commands {
+                walk_cmds(cs, &mut |k| {
+                    if let CommandKind::Assignment(Target::Variable(v), e) = k
+                        && let Some(c) = g.counters.get(v)
+                    {
+                        let want = if c.dir >= 0 { AOp::Plus } else { AOp::Minus };
+                        let stepped = matches!(
+                            e,
+                            AExpr::Binary(l, op, r)
+                                if *op == want
+                                    && matches!(&**l, AExpr::Reference(Target::Variable(w)) if w == v)
+                                    && matches!(&**r, AExpr::Number(k) if *k > 0)
+                        );
+                        assert!(
+                            stepped,
+                            "[{name}/{seed}] counter `{v}` (dir {}) is assigned \
+                             something other than a step in its own direction:\n{p}",
+                            c.dir
+                        );
+                    }
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn no_generated_program_diverges() {
+    use crate::generate::{filter, filter::Class};
+
+    let params = Params::default();
+    for seed in 0..200 {
+        let p = program(&params, seed);
+        let a = filter::analyse(&p, &params);
+        if a.exploded() || a.panicked() {
+            continue; // no verdict was reached, so nothing to assert
+        }
+        assert_ne!(
+            a.metrics.class,
+            Some(Class::Diverges),
+            "seed {seed}: counter loops are supposed to be well-founded:\n{p}"
+        );
+    }
+}
+
+#[test]
+fn turning_the_repairs_off_reproduces_the_m4_generator() {
+    let naive = Params::naive();
+    assert!(!naive.repair_identity_assignments);
+    assert!(!naive.guarantee_loop);
+    assert!(!naive.counter_loops);
+    assert!(!naive.prefer_unread_variables);
+
+    let mut saw_loopless = false;
+    let mut saw_identity = false;
+    for seed in 0..SEEDS {
+        let p = program(&naive, seed);
+        let s = crate::generate::analysis::Static::of(&p);
+        saw_loopless |= !s.has_loop();
+        saw_identity |= s.degeneracies.identity_assignments > 0;
+    }
+    assert!(saw_loopless, "naive params still guarantee a loop");
+    assert!(saw_identity, "naive params still repair identities");
+}
+
+#[test]
+fn every_counter_is_read_and_written() {
+    use crate::generate::analysis::Static;
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let g = crate::generate::generate(&params, seed);
+            let s = Static::of(&g.program);
+            for v in g.counters.keys() {
+                assert!(
+                    s.usage.read.contains(v),
+                    "[{name}/{seed}] counter `{v}` is never read:\n{}",
+                    g.program
+                );
+                assert!(
+                    s.usage.written.contains(v),
+                    "[{name}/{seed}] counter `{v}` is never written:\n{}",
+                    g.program
+                );
+            }
+        }
+    }
+}
 #[test]
 #[ignore = "reporting run, not an assertion"]
 fn m4_sampling_yield() {
@@ -440,5 +615,41 @@ fn m4_sampling_yield() {
             100.0 * ok as f64 / 200.0,
             attempts as f64 / 200.0,
         );
+    }
+}
+
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m45_overshoot() {
+    for (name, params) in presets() {
+        let mut worst = 0i64;
+        let mut total = 0i64;
+        let n = 20_000;
+        for seed in 0..n {
+            let over = node_count(&program(&params, seed)) as i64 - params.size_budget as i64;
+            worst = worst.max(over);
+            total += over.max(0);
+        }
+        println!(
+            "{name}: max overshoot {worst} nodes, mean {:.3}",
+            total as f64 / n as f64
+        );
+    }
+}
+
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m45_examples() {
+    let params = Params::teaching();
+    for seed in 0..4 {
+        let g = crate::generate::generate(&params, seed);
+        println!("--- teaching seed {seed}  counters {:?}", g.counters);
+        println!("{}", g.program);
+    }
+    let params = Params::default();
+    for seed in [0u64, 3, 7] {
+        let g = crate::generate::generate(&params, seed);
+        println!("--- default seed {seed}  counters {:?}", g.counters);
+        println!("{}", g.program);
     }
 }
