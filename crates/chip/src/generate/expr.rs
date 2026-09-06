@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use rand::{Rng, seq::IndexedRandom, seq::SliceRandom};
 
 use crate::{
@@ -25,6 +25,7 @@ pub struct Ctx<'a> {
     pub initial: &'a IndexMap<Variable, i32>,
     next_point: Cell<usize>,
     counters: RefCell<IndexMap<Variable, Counter>>,
+    read: RefCell<IndexSet<Variable>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -40,6 +41,7 @@ impl<'a> Ctx<'a> {
             initial,
             next_point: Cell::new(0),
             counters: RefCell::new(IndexMap::new()),
+            read: RefCell::new(IndexSet::new()),
         }
     }
 
@@ -60,6 +62,22 @@ impl<'a> Ctx<'a> {
             .filter(|(_, c)| c.claims > 0)
             .map(|(v, c)| (v.clone(), *c))
             .collect()
+    }
+
+    fn note_read(&self, v: &Variable) {
+        self.read.borrow_mut().insert(v.clone());
+    }
+
+    // choosing a variable to read preferring one nothing has read yet (i need to solve this shit bug)
+    fn pick_read<R: Rng>(&self, rng: &mut R) -> Variable {
+        if self.params.prefer_unread_variables && rng.random_bool(0.8) {
+            let read = self.read.borrow();
+            let unread: Vec<&Variable> = self.vars.iter().filter(|v| !read.contains(*v)).collect();
+            if let Some(v) = unread.choose(rng) {
+                return (*v).clone();
+            }
+        }
+        self.vars.choose(rng).expect("Γ is non-empty").clone()
     }
 
     pub fn start_of(&self, v: &Variable) -> i32 {
@@ -96,6 +114,8 @@ impl<'a> Ctx<'a> {
         let mut counters = self.counters.borrow_mut();
         let c = counters.get_mut(&v).expect("just picked from the pool");
         c.claims += 1;
+        // the guard this counter is about to appear in reads it
+        self.read.borrow_mut().insert(v.clone());
         c.bound = c
             .bound
             .saturating_add(c.dir.saturating_mul(step.saturating_mul(trips)));
@@ -207,7 +227,9 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
 }
 
 pub fn target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
-    Target::Variable(cx.vars.choose(rng).expect("Γ is non-empty").clone())
+    let v = cx.pick_read(rng);
+    cx.note_read(&v);
+    Target::Variable(v)
 }
 
 pub fn assign_target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
