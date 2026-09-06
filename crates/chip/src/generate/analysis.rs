@@ -146,12 +146,21 @@ fn read_bexpr(e: &BExpr, out: &mut IndexSet<Variable>) {
 }
 
 pub fn fold_aexpr(e: &AExpr) -> Option<i32> {
+    eval_aexpr(e, &indexmap::IndexMap::new())
+}
+
+pub fn fold_bexpr(e: &BExpr) -> Option<bool> {
+    eval_bexpr(e, &indexmap::IndexMap::new())
+}
+
+pub fn eval_aexpr(e: &AExpr, env: &indexmap::IndexMap<Variable, i32>) -> Option<i32> {
     match e {
         AExpr::Number(n) => Some(*n),
+        AExpr::Reference(Target::Variable(v)) => env.get(v).copied(),
         AExpr::Reference(_) | AExpr::Old(_) | AExpr::Function(_) => None,
-        AExpr::Minus(x) => fold_aexpr(x)?.checked_neg(),
+        AExpr::Minus(x) => eval_aexpr(x, env)?.checked_neg(),
         AExpr::Binary(l, op, r) => {
-            let (l, r) = (fold_aexpr(l)?, fold_aexpr(r)?);
+            let (l, r) = (eval_aexpr(l, env)?, eval_aexpr(r, env)?);
             match op {
                 AOp::Plus => l.checked_add(r),
                 AOp::Minus => l.checked_sub(r),
@@ -161,13 +170,13 @@ pub fn fold_aexpr(e: &AExpr) -> Option<i32> {
         }
     }
 }
-pub fn fold_bexpr(e: &BExpr) -> Option<bool> {
+pub fn eval_bexpr(e: &BExpr, env: &indexmap::IndexMap<Variable, i32>) -> Option<bool> {
     match e {
         BExpr::Bool(b) => Some(*b),
-        BExpr::Not(x) => Some(!fold_bexpr(x)?),
+        BExpr::Not(x) => Some(!eval_bexpr(x, env)?),
         BExpr::Quantified(..) => None,
         BExpr::Rel(l, op, r) => {
-            let (l, r) = (fold_aexpr(l)?, fold_aexpr(r)?);
+            let (l, r) = (eval_aexpr(l, env)?, eval_aexpr(r, env)?);
             Some(match op {
                 RelOp::Eq => l == r,
                 RelOp::Ne => l != r,
@@ -178,7 +187,7 @@ pub fn fold_bexpr(e: &BExpr) -> Option<bool> {
             })
         }
         BExpr::Logic(l, op, r) => {
-            let (l, r) = (fold_bexpr(l), fold_bexpr(r));
+            let (l, r) = (eval_bexpr(l, env), eval_bexpr(r, env));
             match op {
                 LogicOp::And | LogicOp::Land => match (l, r) {
                     (Some(false), _) | (_, Some(false)) => Some(false),
