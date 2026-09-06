@@ -439,6 +439,23 @@ fn no_identity_assignment_is_ever_emitted() {
 }
 
 #[test]
+fn every_program_has_a_top_level_loop() {
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            let top_level_loop = p
+                .commands
+                .iter()
+                .any(|cs| cs.0.iter().any(|c| matches!(c.kind, CommandKind::Loop(..))));
+            assert!(
+                top_level_loop,
+                "[{name}/{seed}] guarantee_loop did not produce one:\n{p}"
+            );
+        }
+    }
+}
+
+#[test]
 #[ignore = "reporting run, not an assertion"]
 fn m4_sampling_yield() {
     use crate::generate::sample;

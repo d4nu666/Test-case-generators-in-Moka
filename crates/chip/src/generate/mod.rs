@@ -40,7 +40,7 @@ pub fn program(params: &Params, seed: u64) -> LTLProgram {
 
     let mut size = params.size_budget;
     let mut budget = Budget::new(params.max_depth_cmd, &mut size);
-    let commands = vec![cmd::commands(&cx, &mut budget, &mut rng)];
+    let commands = vec![cmd::top_level(&cx, &mut budget, &mut rng)];
 
     LTLProgram {
         initial,

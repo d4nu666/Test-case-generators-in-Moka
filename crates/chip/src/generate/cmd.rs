@@ -36,6 +36,36 @@ pub fn commands<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Commands<
     Commands(out)
 }
 
+// with guarantee_loop on one position in the sequence is drawn up front
+// and filled with a loop and every command generated before it runs against a budget holding back what that loop will cost;
+// that turns no loop from a rejection reason into an invariant: the sequence has a loop by construction so the filter
+//never has to throw the candidate away for lacking one
+pub fn top_level<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Commands<(), ()> {
+    if !cx.params.guarantee_loop {
+        return commands(cx, budget, rng);
+    }
+
+    let reserve = MIN_GUARD + 1;
+    let n = draw_count(cx.params.seq_len, MIN_ITEM, budget, rng);
+    let at = rng.random_range(0..n.max(1));
+    let depth = budget.depth();
+
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n.max(1) {
+        if i == at {
+            out.push(loop_command(cx, budget, rng));
+        } else {
+            let mut held = budget.with_reserve(depth, if i < at { reserve } else { 0 });
+            out.push(command(cx, &mut held, rng));
+        }
+        // never stop early on the way to the loop
+        if i >= at && budget.size_left() < MIN_ITEM {
+            break;
+        }
+    }
+    Commands(out)
+}
+
 pub fn command<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Command<(), ()> {
     //  before the children are generated so a commands program point is always smaller than its descendants    .
     let span = cx.fresh_span();
@@ -87,6 +117,17 @@ fn assignment<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> CommandKind
         rhs
     };
     CommandKind::Assignment(t, rhs)
+}
+
+fn loop_command<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Command<(), ()> {
+    let span = cx.fresh_span();
+    budget.spend();
+    Command {
+        kind: CommandKind::Loop((), guards(cx, budget, rng)),
+        span,
+        pre: (),
+        post: (),
+    }
 }
 
 pub fn guards<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> Vec<Guard<(), ()>> {

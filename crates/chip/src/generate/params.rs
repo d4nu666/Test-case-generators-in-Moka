@@ -117,6 +117,7 @@ pub struct Params {
     pub reject_constant_guards: bool,
 
     pub repair_identity_assignments: bool,
+    pub guarantee_loop: bool,
 }
 
 impl Default for Params {
@@ -146,6 +147,7 @@ impl Default for Params {
             reject_identity_assignments: true,
             reject_constant_guards: true,
             repair_identity_assignments: true,
+            guarantee_loop: true,
         }
     }
 }
@@ -177,6 +179,7 @@ impl Params {
     pub fn naive() -> Self {
         Self {
             repair_identity_assignments: false,
+            guarantee_loop: false,
             ..Self::default()
         }
     }
@@ -184,6 +187,7 @@ impl Params {
     pub fn without_repairs(&self) -> Self {
         Self {
             repair_identity_assignments: false,
+            guarantee_loop: false,
             ..self.clone()
         }
     }
