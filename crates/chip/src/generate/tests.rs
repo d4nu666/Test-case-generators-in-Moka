@@ -422,7 +422,6 @@ fn m4_report() {
     }
 }
 
-
 #[test]
 #[ignore = "reporting run, not an assertion"]
 fn m45_report() {
@@ -437,6 +436,31 @@ fn m45_report() {
         println!(
             "{}",
             survey(&params, 0..1000).report(&format!("{name} (repaired)"))
+        );
+        println!();
+    }
+}
+
+// the guard repair on its own, against the M4.5 generator. everything else is left switched on so
+// the only difference between the two columns is where the guards come from
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m475_report() {
+    use crate::generate::survey;
+
+    for (name, params) in presets() {
+        let before = Params {
+            repair_constant_guards: false,
+            ..params.clone()
+        };
+        println!(
+            "{}",
+            survey(&before, 0..1000).report(&format!("{name} (m4.5)"))
+        );
+        println!();
+        println!(
+            "{}",
+            survey(&params, 0..1000).report(&format!("{name} (guards repaired)"))
         );
         println!();
     }
@@ -479,6 +503,47 @@ fn no_identity_assignment_is_ever_emitted() {
                 0,
                 "[{name}/{seed}] identity assignment survived the repair:\n{p}"
             );
+        }
+    }
+}
+
+// a guard the folder can decide, or one comparing an expression against itself, is a branch that is
+// really no branch at all. neither should ever come out of the generator with the repair on
+#[test]
+fn no_guard_is_decided_before_the_program_runs() {
+    use crate::generate::analysis::fold_bexpr;
+
+    fn decided(e: &BExpr) -> bool {
+        match e {
+            BExpr::Bool(_) => true,
+            BExpr::Rel(l, _, r) => l == r,
+            BExpr::Logic(l, _, r) => decided(l) || decided(r),
+            BExpr::Not(x) | BExpr::Quantified(_, _, x) => decided(x),
+        }
+    }
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            for cs in &p.commands {
+                walk_cmds(cs, &mut |k| {
+                    let (CommandKind::If(gs) | CommandKind::Loop(_, gs)) = k else {
+                        return;
+                    };
+                    for g in gs {
+                        assert!(
+                            fold_bexpr(&g.guard).is_none(),
+                            "[{name}/{seed}] guard folds to a constant: {}",
+                            g.guard
+                        );
+                        assert!(
+                            !decided(&g.guard),
+                            "[{name}/{seed}] guard does not depend on the state: {}",
+                            g.guard
+                        );
+                    }
+                });
+            }
         }
     }
 }
@@ -560,17 +625,21 @@ fn turning_the_repairs_off_reproduces_the_m4_generator() {
     assert!(!naive.guarantee_loop);
     assert!(!naive.counter_loops);
     assert!(!naive.prefer_unread_variables);
+    assert!(!naive.repair_constant_guards);
 
     let mut saw_loopless = false;
     let mut saw_identity = false;
+    let mut saw_constant_guard = false;
     for seed in 0..SEEDS {
         let p = program(&naive, seed);
         let s = crate::generate::analysis::Static::of(&p);
         saw_loopless |= !s.has_loop();
         saw_identity |= s.degeneracies.identity_assignments > 0;
+        saw_constant_guard |= s.degeneracies.constant_guards > 0;
     }
     assert!(saw_loopless, "naive params still guarantee a loop");
     assert!(saw_identity, "naive params still repair identities");
+    assert!(saw_constant_guard, "naive params still repair guards");
 }
 
 #[test]

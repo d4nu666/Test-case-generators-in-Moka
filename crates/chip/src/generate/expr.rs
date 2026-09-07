@@ -11,6 +11,9 @@ use crate::{
 
 pub type Dir = i32;
 
+// x < 7 — the relation plus its two leaves, the cheapest guard that still depends on the state
+const REL_COST: u32 = 3;
+
 // variable reserved to drive loops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Counter {
@@ -186,14 +189,32 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
     };
 
     let afford = |cost: u32| if budget.size_left() >= cost { 1.0 } else { 0.0 };
+    // a true/false leaf is a constant guard on its own, there is no repairing it after the fact,
+    // so with the knob on it is simply never offered
+    let constants = if cx.params.repair_constant_guards {
+        0.0
+    } else {
+        1.0
+    };
 
+    // the old gates only asked for enough room for the operator and one leaf, which is how a
+    // connective got offered and then had to fall back to true/false for its second child.
+    // with the repair on the gate asks for what the children actually cost, a whole relation each
+    let (logic_cost, not_cost) = if cx.params.repair_constant_guards {
+        (2 * REL_COST + 1, REL_COST + 1)
+    } else {
+        (5, 2)
+    };
+
+    // order matters: pick returns the first alternative when every weight is zero, and the naive
+    // generator has to keep drawing exactly what it drew for the M4 numbers, so nothing moves here
     let tag = pick(
         &[
-            (w.constant, 1),
-            (w.rel * afford(3), 0),
-            (w.and * decay * afford(5), 2),
-            (w.or * decay * afford(5), 3),
-            (w.not * decay * afford(2), 4),
+            (w.constant * constants, 1),
+            (w.rel * afford(REL_COST), 0),
+            (w.and * decay * afford(logic_cost), 2),
+            (w.or * decay * afford(logic_cost), 3),
+            (w.not * decay * afford(not_cost), 4),
         ],
         rng,
     );
@@ -205,7 +226,23 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
             let mut d = budget.descend();
             let lhs = aexpr(cx, &mut d, rng);
             let rhs = aexpr(cx, &mut d, rng);
+            let (lhs, rhs) = if cx.params.repair_constant_guards {
+                unfold_rel(cx, rng, lhs, rhs)
+            } else {
+                (lhs, rhs)
+            };
             BExpr::Rel(lhs, op, rhs)
+        }
+        // with the repair on the constant has weight zero, so landing here at all means pick ran out
+        // of affordable alternatives and fell back. a constant is not an option, so buy the relation
+        // anyway. it is 2 nodes over what was left, which is what the soft cap is for
+        1 if cx.params.repair_constant_guards => {
+            budget.spend_n(REL_COST - 1);
+            BExpr::Rel(
+                AExpr::Reference(target(cx, rng)),
+                relop(cx, rng),
+                AExpr::Number(cx.params.int_range.sample_i32(rng)),
+            )
         }
         1 => BExpr::Bool(rng.random_bool(0.5)),
         2 | 3 => {
@@ -215,7 +252,15 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
                 LogicOp::Lor
             };
             let mut d = budget.descend();
-            let lhs = bexpr(cx, &mut d, rng);
+            // hold back what the right hand side needs while the left one is drawn, or the left one
+            // eats the whole pool and the right one has nothing left to be a real relation with
+            let lhs = if cx.params.repair_constant_guards {
+                let depth = d.depth();
+                let mut held = d.with_reserve(depth, REL_COST);
+                bexpr(cx, &mut held, rng)
+            } else {
+                bexpr(cx, &mut d, rng)
+            };
             let rhs = bexpr(cx, &mut d, rng);
             BExpr::Logic(Box::new(lhs), op, Box::new(rhs))
         }
@@ -224,6 +269,24 @@ pub fn bexpr<R: Rng>(cx: &Ctx, budget: &mut Budget, rng: &mut R) -> BExpr {
             BExpr::Not(Box::new(bexpr(cx, &mut d, rng)))
         }
     }
+}
+
+// a relation whose truth is already settled before the program starts is not a guard, it is a
+// comment. two ways that happens: both sides are literal arithmetic (5 < 0), or the two sides are
+// the same expression (d >= d), which the folder never catches because it cannot evaluate d.
+// both are fixed by swapping one side out, and the replacement is a single node while the side it
+// replaces is at least one, so this never costs the budget anything
+fn unfold_rel<R: Rng>(cx: &Ctx, rng: &mut R, lhs: AExpr, rhs: AExpr) -> (AExpr, AExpr) {
+    use crate::generate::analysis::fold_aexpr;
+
+    if fold_aexpr(&lhs).is_some() && fold_aexpr(&rhs).is_some() {
+        // a reference cannot fold, so whatever the other side is the relation now depends on the state
+        return (AExpr::Reference(target(cx, rng)), rhs);
+    }
+    if lhs == rhs {
+        return (lhs, AExpr::Number(cx.params.int_range.sample_i32(rng)));
+    }
+    (lhs, rhs)
 }
 
 pub fn target<R: Rng>(cx: &Ctx, rng: &mut R) -> Target<Box<AExpr>> {
