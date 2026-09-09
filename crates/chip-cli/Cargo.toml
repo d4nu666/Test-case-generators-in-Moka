@@ -16,7 +16,7 @@ dist = true
 
 [dependencies]
 camino.workspace = true
-chip.workspace = true
+chip = { workspace = true, features = ["generate"] }
 clap.workspace = true
 color-eyre.workspace = true
 gitty.workspace = true

@@ -85,7 +85,7 @@ impl Static {
     fn walk_guards(&mut self, gs: &[crate::ast::Guard<(), ()>]) {
         for g in gs {
             read_bexpr(&g.guard, &mut self.usage.read);
-            match fold_bexpr(&g.guard) {
+            match decide_bexpr(&g.guard) {
                 Some(false) => {
                     self.degeneracies.constant_guards += 1;
                     self.degeneracies.dead_guards += 1;
@@ -151,6 +151,39 @@ pub fn fold_aexpr(e: &AExpr) -> Option<i32> {
 
 pub fn fold_bexpr(e: &BExpr) -> Option<bool> {
     eval_bexpr(e, &indexmap::IndexMap::new())
+}
+
+// folding cannot decide x >= x, it does not know what x is. it does not need to: both sides are the
+// same expression, so the relation answers the same in every state and the branch is as dead as
+// 5 < 0. settle those to a literal first and then let the folder do the rest
+pub fn decide_bexpr(e: &BExpr) -> Option<bool> {
+    fold_bexpr(&settle_reflexive(e))
+}
+
+fn settle_reflexive(e: &BExpr) -> BExpr {
+    match e {
+        BExpr::Rel(l, op, r) if l == r && cannot_fail(l) => {
+            BExpr::Bool(matches!(op, RelOp::Eq | RelOp::Ge | RelOp::Le))
+        }
+        BExpr::Logic(l, op, r) => BExpr::Logic(
+            Box::new(settle_reflexive(l)),
+            *op,
+            Box::new(settle_reflexive(r)),
+        ),
+        BExpr::Not(x) => BExpr::Not(Box::new(settle_reflexive(x))),
+        other => other.clone(),
+    }
+}
+
+// x / 0 = x / 0 is not true, it is a step error, and same for fac of something negative.
+// so only say the two sides agree when evaluating them cannot go wrong in the first place
+fn cannot_fail(e: &AExpr) -> bool {
+    match e {
+        AExpr::Number(_) | AExpr::Reference(_) | AExpr::Old(_) => true,
+        AExpr::Binary(l, op, r) => *op != AOp::Divide && cannot_fail(l) && cannot_fail(r),
+        AExpr::Minus(x) => cannot_fail(x),
+        AExpr::Function(_) => false,
+    }
 }
 
 pub fn eval_aexpr(e: &AExpr, env: &indexmap::IndexMap<Variable, i32>) -> Option<i32> {
@@ -283,6 +316,40 @@ mod tests {
         let d = Static::of(&p).degeneracies;
         assert_eq!(d.constant_guards, 1);
         assert_eq!(d.dead_guards, 1);
+    }
+
+    #[test]
+    fn spots_a_guard_comparing_a_variable_to_itself() {
+        let n = AExpr::Reference(Target::Variable(Variable("n".into())));
+        let reflexive = BExpr::Rel(n.clone(), RelOp::Ge, n);
+        // always true, so the loop never leaves, but the folder on its own says nothing about it
+        assert_eq!(fold_bexpr(&reflexive), None);
+        assert_eq!(decide_bexpr(&reflexive), Some(true));
+
+        let p = prog("> n = 1\ndo n >= n -> n := n + 1 od");
+        assert_eq!(Static::of(&p).degeneracies.constant_guards, 1);
+
+        let dead = prog("> n = 1\nif n < n -> n := n + 1 fi");
+        let d = Static::of(&dead).degeneracies;
+        assert_eq!(d.constant_guards, 1);
+        assert_eq!(d.dead_guards, 1);
+    }
+
+    #[test]
+    fn a_reflexive_comparison_that_can_fault_is_left_alone() {
+        // x / 0 = x / 0 is a step error, not a truth, so it is not our business to call it constant
+        let e = BExpr::Rel(
+            AExpr::Function(Function::Division(
+                Box::new(AExpr::Reference(Target::Variable(Variable("x".into())))),
+                Box::new(AExpr::Number(0)),
+            )),
+            RelOp::Eq,
+            AExpr::Function(Function::Division(
+                Box::new(AExpr::Reference(Target::Variable(Variable("x".into())))),
+                Box::new(AExpr::Number(0)),
+            )),
+        );
+        assert_eq!(decide_bexpr(&e), None);
     }
 
     #[test]

@@ -11,7 +11,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-chip.workspace = true
+# the generate feature pulls rand in. only the moka page uses it, and the wasm build goes
+# through wasm-pack on this crate alone so it never unifies with anything else
+chip = { workspace = true, features = ["generate"] }
 comfy-table = { version = "7.1.1", default-features = false }
 console_error_panic_hook = "0.1.7"
 getrandom = { version = "0.3.3", features = ["wasm_js"] }

@@ -20,6 +20,7 @@ pub enum Rejection {
     NeverWritten(Variable),
     IdentityAssignment { count: usize },
     ConstantGuard { count: usize },
+    Faults { count: usize },
 }
 
 // payload-free key for the rejection histogram
@@ -35,10 +36,11 @@ pub enum Reason {
     NeverWritten,
     IdentityAssignment,
     ConstantGuard,
+    Faults,
 }
 
 impl Reason {
-    pub const ALL: [Reason; 10] = [
+    pub const ALL: [Reason; 11] = [
         Reason::StateSpaceExplosion,
         Reason::InterpreterPanic,
         Reason::TooFewStates,
@@ -49,6 +51,7 @@ impl Reason {
         Reason::NeverWritten,
         Reason::IdentityAssignment,
         Reason::ConstantGuard,
+        Reason::Faults,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -63,6 +66,7 @@ impl Reason {
             Reason::NeverWritten => "variable never written",
             Reason::IdentityAssignment => "identity assignment",
             Reason::ConstantGuard => "constant guard",
+            Reason::Faults => "execution faults",
         }
     }
 }
@@ -80,6 +84,7 @@ impl Rejection {
             Rejection::NeverWritten(_) => Reason::NeverWritten,
             Rejection::IdentityAssignment { .. } => Reason::IdentityAssignment,
             Rejection::ConstantGuard { .. } => Reason::ConstantGuard,
+            Rejection::Faults { .. } => Reason::Faults,
         }
     }
 }
@@ -103,6 +108,9 @@ impl std::fmt::Display for Rejection {
             Rejection::NeverWritten(v) => write!(f, "`{v}` is never written"),
             Rejection::IdentityAssignment { count } => write!(f, "{count} identity assignment(s)"),
             Rejection::ConstantGuard { count } => write!(f, "{count} statically constant guard(s)"),
+            Rejection::Faults { count } => {
+                write!(f, "{count} state(s) fault instead of finishing")
+            }
         }
     }
 }
@@ -276,6 +284,14 @@ pub fn analyse(p: &LTLProgram, params: &Params) -> Analysis {
             metrics.stuck_states = stuck_states;
             metrics.faulted_states = faulted_states;
             metrics.class = Some(class);
+
+            // no successors, so it reads as termination and the trace is cut short. off by
+            // default, a faulting program is the interesting one when hunting moka bugs
+            if params.reject_faulting && faulted_states > 0 {
+                rejections.push(Rejection::Faults {
+                    count: faulted_states,
+                });
+            }
 
             let min = params.state_bounds.min.max(0) as usize;
             let max = params.state_bounds.max.max(0) as usize;

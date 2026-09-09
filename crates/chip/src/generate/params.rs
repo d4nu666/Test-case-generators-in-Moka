@@ -115,6 +115,8 @@ pub struct Params {
     pub reject_unused_vars: bool,
     pub reject_identity_assignments: bool,
     pub reject_constant_guards: bool,
+    // drop candidates that die on an overflow or a divide by zero
+    pub reject_faulting: bool,
 
     pub repair_identity_assignments: bool,
     pub guarantee_loop: bool,
@@ -123,6 +125,8 @@ pub struct Params {
     pub loop_step: Bounds,
     pub prefer_unread_variables: bool,
     pub p_guard_conjunct: f64,
+    // with this on a guard can never be decided before the program runs, so w_bexpr.constant is ignored
+    pub repair_constant_guards: bool,
 }
 
 impl Default for Params {
@@ -151,6 +155,7 @@ impl Default for Params {
             reject_unused_vars: true,
             reject_identity_assignments: true,
             reject_constant_guards: true,
+            reject_faulting: false,
             repair_identity_assignments: true,
             guarantee_loop: true,
             counter_loops: true,
@@ -158,6 +163,7 @@ impl Default for Params {
             loop_trip_count: Bounds::new(2, 6),
             loop_step: Bounds::new(1, 2),
             p_guard_conjunct: 0.35,
+            repair_constant_guards: true,
         }
     }
 }
@@ -192,16 +198,19 @@ impl Params {
             guarantee_loop: false,
             counter_loops: false,
             prefer_unread_variables: false,
+            repair_constant_guards: false,
             ..Self::default()
         }
     }
 
+    // the control group for the A/B. every by-construction repair off, so what is left is the M4 generator
     pub fn without_repairs(&self) -> Self {
         Self {
             repair_identity_assignments: false,
             guarantee_loop: false,
             counter_loops: false,
             prefer_unread_variables: false,
+            repair_constant_guards: false,
             ..self.clone()
         }
     }

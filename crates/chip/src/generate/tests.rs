@@ -422,7 +422,6 @@ fn m4_report() {
     }
 }
 
-
 #[test]
 #[ignore = "reporting run, not an assertion"]
 fn m45_report() {
@@ -437,6 +436,31 @@ fn m45_report() {
         println!(
             "{}",
             survey(&params, 0..1000).report(&format!("{name} (repaired)"))
+        );
+        println!();
+    }
+}
+
+// the guard repair on its own, against the M4.5 generator. everything else is left switched on so
+// the only difference between the two columns is where the guards come from
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m475_report() {
+    use crate::generate::survey;
+
+    for (name, params) in presets() {
+        let before = Params {
+            repair_constant_guards: false,
+            ..params.clone()
+        };
+        println!(
+            "{}",
+            survey(&before, 0..1000).report(&format!("{name} (m4.5)"))
+        );
+        println!();
+        println!(
+            "{}",
+            survey(&params, 0..1000).report(&format!("{name} (guards repaired)"))
         );
         println!();
     }
@@ -479,6 +503,47 @@ fn no_identity_assignment_is_ever_emitted() {
                 0,
                 "[{name}/{seed}] identity assignment survived the repair:\n{p}"
             );
+        }
+    }
+}
+
+// a guard the folder can decide, or one comparing an expression against itself, is a branch that is
+// really no branch at all. neither should ever come out of the generator with the repair on
+#[test]
+fn no_guard_is_decided_before_the_program_runs() {
+    use crate::generate::analysis::fold_bexpr;
+
+    fn decided(e: &BExpr) -> bool {
+        match e {
+            BExpr::Bool(_) => true,
+            BExpr::Rel(l, _, r) => l == r,
+            BExpr::Logic(l, _, r) => decided(l) || decided(r),
+            BExpr::Not(x) | BExpr::Quantified(_, _, x) => decided(x),
+        }
+    }
+
+    for (name, params) in presets() {
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            for cs in &p.commands {
+                walk_cmds(cs, &mut |k| {
+                    let (CommandKind::If(gs) | CommandKind::Loop(_, gs)) = k else {
+                        return;
+                    };
+                    for g in gs {
+                        assert!(
+                            fold_bexpr(&g.guard).is_none(),
+                            "[{name}/{seed}] guard folds to a constant: {}",
+                            g.guard
+                        );
+                        assert!(
+                            !decided(&g.guard),
+                            "[{name}/{seed}] guard does not depend on the state: {}",
+                            g.guard
+                        );
+                    }
+                });
+            }
         }
     }
 }
@@ -560,17 +625,21 @@ fn turning_the_repairs_off_reproduces_the_m4_generator() {
     assert!(!naive.guarantee_loop);
     assert!(!naive.counter_loops);
     assert!(!naive.prefer_unread_variables);
+    assert!(!naive.repair_constant_guards);
 
     let mut saw_loopless = false;
     let mut saw_identity = false;
+    let mut saw_constant_guard = false;
     for seed in 0..SEEDS {
         let p = program(&naive, seed);
         let s = crate::generate::analysis::Static::of(&p);
         saw_loopless |= !s.has_loop();
         saw_identity |= s.degeneracies.identity_assignments > 0;
+        saw_constant_guard |= s.degeneracies.constant_guards > 0;
     }
     assert!(saw_loopless, "naive params still guarantee a loop");
     assert!(saw_identity, "naive params still repair identities");
+    assert!(saw_constant_guard, "naive params still repair guards");
 }
 
 #[test]
@@ -651,5 +720,66 @@ fn m45_examples() {
         let g = crate::generate::generate(&params, seed);
         println!("--- default seed {seed}  counters {:?}", g.counters);
         println!("{}", g.program);
+    }
+}
+
+// what the checked arithmetic did to the numbers. an overflow used to kill the whole analysis,
+// now it is just a dead end state and the candidate gets judged on the rest
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m6_faults() {
+    use crate::generate::{filter, filter::Class};
+
+    for (name, params) in presets() {
+        let stats = crate::generate::survey(&params, 0..SEEDS);
+        let (mut faulting, mut accepted_faulting) = (0usize, 0usize);
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            let a = filter::analyse(&p, &params);
+            if a.metrics.faulted_states > 0 || a.metrics.class == Some(Class::Faults) {
+                faulting += 1;
+                if a.accepted() {
+                    accepted_faulting += 1;
+                }
+            }
+        }
+        // what the browser pays for the knob
+        let strict = Params {
+            reject_faulting: true,
+            ..params.clone()
+        };
+        let strict_stats = crate::generate::survey(&strict, 0..SEEDS);
+
+        println!(
+            "{name}: acceptance {:.1} %, panics {}, {faulting}/{SEEDS} candidates fault, \
+             {accepted_faulting} of them are accepted anyway. \
+             with reject_faulting on, acceptance {:.1} %",
+            100.0 * stats.accepted as f64 / stats.candidates as f64,
+            stats.panics,
+            100.0 * strict_stats.accepted as f64 / strict_stats.candidates as f64,
+        );
+    }
+}
+
+// the knob the moka button turns on. a program that dies half way looks like it terminated
+#[test]
+fn faulting_programs_are_rejected_when_asked() {
+    use crate::generate::filter;
+
+    for (name, params) in presets() {
+        let strict = Params {
+            reject_faulting: true,
+            ..params
+        };
+        for seed in 0..SEEDS {
+            let p = program(&strict, seed);
+            let a = filter::analyse(&p, &strict);
+            if a.accepted() {
+                assert_eq!(
+                    a.metrics.faulted_states, 0,
+                    "[{name}/{seed}] accepted a program with a faulting state:\n{p}"
+                );
+            }
+        }
     }
 }

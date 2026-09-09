@@ -3,7 +3,7 @@ use rand::Rng;
 use crate::{
     ast::{AExpr, AOp, BExpr, Command, CommandKind, Commands, Guard, LogicOp, RelOp, Target},
     generate::{
-        analysis::{eval_bexpr, fold_bexpr},
+        analysis::{decide_bexpr, eval_bexpr},
         budget::Budget,
         expr::{self, Ctx, Dir, pick},
         params::Bounds,
@@ -225,7 +225,7 @@ fn counter_guard<R: Rng>(
             let mut e = budget.with_reserve(cx.params.max_depth_expr.saturating_sub(1), STEP_COST);
             expr::bexpr(cx, &mut e, rng)
         };
-        let usable = fold_bexpr(&extra).is_none()
+        let usable = decide_bexpr(&extra).is_none()
             && !mentions(&extra, v)
             && eval_bexpr(&extra, cx.initial) == Some(true);
         if usable {

@@ -101,6 +101,40 @@ check ! F ! (x >= -1)       // should hold
     run().catch(console.error);
   }
 
+  // the wasm side does the work. assigning to program re-triggers the check above by itself
+  let preset = 'default';
+  let generating = false;
+  let generated: { seed: number; attempts: number } | null = null;
+  let generateError: string | null = null;
+
+  const generateProgram = async () => {
+    generating = true;
+    generateError = null;
+    generated = null;
+    try {
+      const { default: init, generate_program } = await import('chip-wasm');
+      await init();
+      // seed from js so it stays a plain number, and so chip generate can reuse it
+      const seed = Math.floor(Math.random() * 2 ** 32);
+      // sampling blocks the page, let the button repaint as disabled first
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      console.time('generate wasm');
+      const res = generate_program(seed, preset);
+      console.timeEnd('generate wasm');
+      if (res.accepted) {
+        program = res.program;
+        generated = { seed: res.seed, attempts: res.attempts };
+      } else {
+        // a dead seed is about the params, not the browser. press it again
+        generateError = `no program passed the filter in ${res.attempts} tries`;
+      }
+    } catch (e) {
+      generateError = String(e);
+    } finally {
+      generating = false;
+    }
+  };
+
   const prepareDot = (dot: string) =>
     dot
       .trim()
@@ -120,11 +154,33 @@ check ! F ! (x >= -1)       // should hold
 <Nav title="Moka" {Icon} />
 
 <div class="relative grid grid-cols-2 grid-rows-[2fr_auto] bg-slate-800">
-  <Editor
-    bind:value={program}
-    bind:hoveredMarker
-    markers={[...$result.markers.map((m) => m[0]), ...$verifications, ...hoverMakers]}
-  />
+  <div class="flex min-h-0 flex-col">
+    <div class="flex items-center space-x-3 bg-slate-900 px-3 py-1.5 text-sm text-white">
+      <button
+        on:click={generateProgram}
+        disabled={generating}
+        class="font-bold transition hover:text-slate-300 disabled:opacity-50"
+      >
+        {generating ? 'Generating...' : 'Generate'}
+      </button>
+      <select
+        bind:value={preset}
+        disabled={generating}
+        class="rounded-sm bg-slate-800 px-1 py-0.5 text-xs"
+        title="which parameters to generate from"
+      >
+        <option value="default">default</option>
+        <option value="stress">stress</option>
+      </select>
+    </div>
+    <div class="relative min-h-0 flex-1">
+      <Editor
+        bind:value={program}
+        bind:hoveredMarker
+        markers={[...$result.markers.map((m) => m[0]), ...$verifications, ...hoverMakers]}
+      />
+    </div>
+  </div>
   <div class="flex flex-col text-white">
     {#if false}
       {#each graphs as { title, dot }}
@@ -194,7 +250,14 @@ check ! F ! (x >= -1)       // should hold
           }[$status]}
     </span>
     <div class="flex-1"></div>
-    <span class="text-xl">
+    <span class="text-base">
+      {#if generateError}
+        {generateError}
+      {:else if generated}
+        seed <b>{generated.seed}</b> &middot;
+        {generated.attempts}
+        {generated.attempts == 1 ? 'candidate' : 'candidates'} drawn
+      {/if}
       <!-- {#if !$parseError && $state == 'checked'}
           {#if $result.is_fully_annotated}
             The program is <b>fully annotated</b>

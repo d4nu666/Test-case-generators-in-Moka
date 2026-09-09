@@ -263,12 +263,14 @@ impl Drop for TimingGuard {
     }
 }
 
+// the filter uses this too, so a generated program cannot explode once it is in the editor
+const FUEL: u32 = 5000;
+
 #[wasm_bindgen]
 pub fn parse_ltl(src: &str) -> LtLResult {
     let timing = Timing::default();
 
     let res = timing.time("parse", || chip::parse::parse_ltl_program(src));
-    const FUEL: u32 = 5000;
 
     match res {
         Ok(ast) => {
@@ -530,6 +532,59 @@ pub fn parse_ltl(src: &str) -> LtLResult {
             gbuchi_property_dot: "".to_string(),
             buchi_property_dot: "".to_string(),
             product_ba_dot: "".to_string(),
+        },
+    }
+}
+
+// the generate button. the real work is in chip::generate, this is just the browser seam
+
+#[derive(Debug, Clone, Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedProgram {
+    // empty when nothing passed the filter
+    pub program: String,
+    pub seed: u32,
+    // candidates drawn, this one included
+    pub attempts: u32,
+    pub accepted: bool,
+}
+
+// sampling blocks the page, so way fewer tries than the cli gets
+const UI_MAX_ATTEMPTS: u32 = 25;
+
+fn preset_params(preset: &str) -> chip::generate::params::Params {
+    use chip::generate::params::Params;
+    match preset {
+        "stress" => Params::stress(),
+        // the ui says default but means teaching, small programs are what you want to read first
+        _ => Params::teaching(),
+    }
+}
+
+// u32 and not u64 because wasm_bindgen turns u64 into a BigInt and js just wants Math.random
+#[wasm_bindgen]
+pub fn generate_program(seed: u32, preset: &str) -> GeneratedProgram {
+    let mut params = preset_params(preset);
+    params.max_attempts = UI_MAX_ATTEMPTS;
+    params.explore_fuel = FUEL;
+    // a faulting state has no successors, so it looks like the program finished. confusing here
+    params.reject_faulting = true;
+
+    match chip::generate::sample(&params, seed as u64).result {
+        // the seed goes in a comment so it survives the parser and you can regenerate this one
+        Ok(accepted) => GeneratedProgram {
+            program: format!("// seed {seed}\n{}", accepted.program),
+            seed,
+            attempts: accepted.attempts,
+            accepted: true,
+        },
+        // a dead seed says something about the params, not a crash. draw another
+        Err(e) => GeneratedProgram {
+            program: String::new(),
+            seed,
+            attempts: e.attempts,
+            accepted: false,
         },
     }
 }

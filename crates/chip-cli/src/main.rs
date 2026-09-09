@@ -1,4 +1,5 @@
 mod chip_check;
+mod generate;
 mod moka_check;
 
 use std::time::Duration;
@@ -98,6 +99,13 @@ enum Cmd {
         #[clap(long)]
         moka: bool,
     },
+
+    /// Generate random Moka programs
+    ///
+    /// Draws candidates from the seed until one passes the acceptance filter,
+    /// so every program it prints has a loop that runs, no dead variables and
+    /// terminates.
+    Generate(generate::GenerateArgs),
 
     /// Format a program
     Fmt {
@@ -336,6 +344,7 @@ async fn run() -> Result<()> {
                 }
             }
         }
+        Cmd::Generate(args) => generate::generate(args)?,
         Cmd::Fmt { path, chip, moka } => {
             let src =
                 std::fs::read_to_string(path).with_context(|| format!("failed to read {path}"))?;

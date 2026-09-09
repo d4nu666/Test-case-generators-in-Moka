@@ -187,6 +187,8 @@ pub struct State {
 #[derive(Debug)]
 pub enum StepError {
     DivisionByZero,
+    // does not fit in an i32. used to be a plain panic
+    Overflow,
     NegativeFactorial,
     NegativeFibonacci,
     NegativePower,
@@ -340,13 +342,23 @@ impl AExpr {
                 let l = l.evaluate(p, state)?;
                 let r = r.evaluate(p, state)?;
                 match op {
-                    AOp::Plus => l + r,
-                    AOp::Minus => l - r,
-                    AOp::Times => l * r,
-                    AOp::Divide => l / r,
+                    // checked. plain l + r panics in debug, wraps in release, neither is ok here
+                    AOp::Plus => l.checked_add(r).ok_or(StepError::Overflow)?,
+                    AOp::Minus => l.checked_sub(r).ok_or(StepError::Overflow)?,
+                    AOp::Times => l.checked_mul(r).ok_or(StepError::Overflow)?,
+                    AOp::Divide => {
+                        if r == 0 {
+                            return Err(StepError::DivisionByZero);
+                        }
+                        // i32::MIN / -1 overflows instead of dividing
+                        l.checked_div(r).ok_or(StepError::Overflow)?
+                    }
                 }
             }
-            AExpr::Minus(e) => -e.evaluate(p, state)?,
+            AExpr::Minus(e) => e
+                .evaluate(p, state)?
+                .checked_neg()
+                .ok_or(StepError::Overflow)?,
             AExpr::Function(f) => match f {
                 Function::Division(a, b) => {
                     let a = a.evaluate(p, state)?;
@@ -354,7 +366,7 @@ impl AExpr {
                     if b == 0 {
                         return Err(StepError::DivisionByZero);
                     }
-                    a / b
+                    a.checked_div(b).ok_or(StepError::Overflow)?
                 }
                 Function::Min(a, b) => {
                     let a = a.evaluate(p, state)?;
@@ -371,17 +383,22 @@ impl AExpr {
                     if x < 0 {
                         return Err(StepError::NegativeFactorial);
                     }
-                    (1..=x).product()
+                    // 13! already does not fit
+                    let mut acc: i32 = 1;
+                    for i in 1..=x {
+                        acc = acc.checked_mul(i).ok_or(StepError::Overflow)?;
+                    }
+                    acc
                 }
                 Function::Fib(x) => {
                     let x = x.evaluate(p, state)?;
                     if x < 0 {
                         return Err(StepError::NegativeFibonacci);
                     }
-                    let mut a = 0;
-                    let mut b = 1;
+                    let mut a: i32 = 0;
+                    let mut b: i32 = 1;
                     for _ in 0..x {
-                        let c = a + b;
+                        let c = a.checked_add(b).ok_or(StepError::Overflow)?;
                         a = b;
                         b = c;
                     }
@@ -393,7 +410,7 @@ impl AExpr {
                     if b < 0 {
                         return Err(StepError::NegativePower);
                     }
-                    a.pow(b as u32)
+                    a.checked_pow(b as u32).ok_or(StepError::Overflow)?
                 }
             },
             AExpr::Old(_) => return Err(StepError::HitOld),
