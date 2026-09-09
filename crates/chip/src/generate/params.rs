@@ -115,6 +115,8 @@ pub struct Params {
     pub reject_unused_vars: bool,
     pub reject_identity_assignments: bool,
     pub reject_constant_guards: bool,
+    // drop candidates that die on an overflow or a divide by zero
+    pub reject_faulting: bool,
 
     pub repair_identity_assignments: bool,
     pub guarantee_loop: bool,
@@ -153,6 +155,7 @@ impl Default for Params {
             reject_unused_vars: true,
             reject_identity_assignments: true,
             reject_constant_guards: true,
+            reject_faulting: false,
             repair_identity_assignments: true,
             guarantee_loop: true,
             counter_loops: true,

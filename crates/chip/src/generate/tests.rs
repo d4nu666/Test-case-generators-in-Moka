@@ -722,3 +722,64 @@ fn m45_examples() {
         println!("{}", g.program);
     }
 }
+
+// what the checked arithmetic did to the numbers. an overflow used to kill the whole analysis,
+// now it is just a dead end state and the candidate gets judged on the rest
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m6_faults() {
+    use crate::generate::{filter, filter::Class};
+
+    for (name, params) in presets() {
+        let stats = crate::generate::survey(&params, 0..SEEDS);
+        let (mut faulting, mut accepted_faulting) = (0usize, 0usize);
+        for seed in 0..SEEDS {
+            let p = program(&params, seed);
+            let a = filter::analyse(&p, &params);
+            if a.metrics.faulted_states > 0 || a.metrics.class == Some(Class::Faults) {
+                faulting += 1;
+                if a.accepted() {
+                    accepted_faulting += 1;
+                }
+            }
+        }
+        // what the browser pays for the knob
+        let strict = Params {
+            reject_faulting: true,
+            ..params.clone()
+        };
+        let strict_stats = crate::generate::survey(&strict, 0..SEEDS);
+
+        println!(
+            "{name}: acceptance {:.1} %, panics {}, {faulting}/{SEEDS} candidates fault, \
+             {accepted_faulting} of them are accepted anyway. \
+             with reject_faulting on, acceptance {:.1} %",
+            100.0 * stats.accepted as f64 / stats.candidates as f64,
+            stats.panics,
+            100.0 * strict_stats.accepted as f64 / strict_stats.candidates as f64,
+        );
+    }
+}
+
+// the knob the moka button turns on. a program that dies half way looks like it terminated
+#[test]
+fn faulting_programs_are_rejected_when_asked() {
+    use crate::generate::filter;
+
+    for (name, params) in presets() {
+        let strict = Params {
+            reject_faulting: true,
+            ..params
+        };
+        for seed in 0..SEEDS {
+            let p = program(&strict, seed);
+            let a = filter::analyse(&p, &strict);
+            if a.accepted() {
+                assert_eq!(
+                    a.metrics.faulted_states, 0,
+                    "[{name}/{seed}] accepted a program with a faulting state:\n{p}"
+                );
+            }
+        }
+    }
+}

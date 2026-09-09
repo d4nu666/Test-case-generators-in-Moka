@@ -45,6 +45,9 @@ pub struct GenerateArgs {
     /// Write one file per program here instead of printing them
     #[clap(long, short)]
     out: Option<Utf8PathBuf>,
+    /// Throw away programs whose execution faults, ie overflows or divides by zero
+    #[clap(long)]
+    reject_faulting: bool,
     /// Print the acceptance statistics on stderr when done
     #[clap(long)]
     stats: bool,
@@ -80,11 +83,16 @@ pub fn generate(args: &GenerateArgs) -> Result<()> {
                 // the header is a comment so it survives a round trip through the parser,
                 // and it tells you which flags to pass to get this exact program back
                 let src = format!(
-                    "// chip generate --seed {seed} --preset {}{}\n{}",
+                    "// chip generate --seed {seed} --preset {}{}{}\n{}",
                     preset_name(args.preset),
                     match &args.params {
                         Some(p) => format!(" --params {p}"),
                         None => String::new(),
+                    },
+                    if args.reject_faulting {
+                        " --reject-faulting"
+                    } else {
+                        ""
                     },
                     accepted.program
                 );
@@ -140,6 +148,11 @@ fn load_params(args: &GenerateArgs) -> Result<Params> {
         params = base
             .try_into()
             .with_context(|| format!("{path} is not a valid parameter set"))?;
+    }
+
+    // after the merge, so the flag wins over the preset and the params file
+    if args.reject_faulting {
+        params.reject_faulting = true;
     }
 
     Ok(params)
