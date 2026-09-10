@@ -266,6 +266,9 @@ impl Drop for TimingGuard {
 // the filter uses this too, so a generated program cannot explode once it is in the editor
 const FUEL: u32 = 5000;
 
+// how many steps of a counterexample the hover box shows before it gets silly
+const TRACE_ROWS: usize = 10;
+
 #[wasm_bindgen]
 pub fn parse_ltl(src: &str) -> LtLResult {
     let timing = Timing::default();
@@ -448,6 +451,7 @@ pub fn parse_ltl(src: &str) -> LtLResult {
                         .collect(),
                         rows: trace
                             .iter()
+                            .take(TRACE_ROWS)
                             .enumerate()
                             .map(|(idx, s)| {
                                 std::iter::once((
@@ -467,12 +471,18 @@ pub fn parse_ltl(src: &str) -> LtLResult {
                     let reason = chip::explain::why_failed(property, &trace, &rs.program)
                         .unwrap_or_else(|| "LTL property does not hold".to_string());
 
+                    // a 40 step trace in a hover box is unreadable, cut it and say how much is left
+                    let cut = match trace.len().saturating_sub(TRACE_ROWS) {
+                        0 => String::new(),
+                        n => format!("\n\n... {n} more step(s)"),
+                    };
+
                     markers.push((
                         MarkerData {
                             related_information: None,
                             tags: None,
                             severity: MarkerSeverity::Error,
-                            message: format!("{reason}\n\n{html_table}"),
+                            message: format!("{reason}\n\n{html_table}{cut}"),
                             span: MonacoSpan::from_offset_len(
                                 src,
                                 property_span.offset(),
