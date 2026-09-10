@@ -802,9 +802,21 @@ fn generated_checks_parse() {
 
             let checks = props::check_lines(&rs, 5, seed);
             let with_checks = format!("{src}{checks}");
-            parse_ltl_program(&with_checks).unwrap_or_else(|e| {
+            let reparsed = parse_ltl_program(&with_checks).unwrap_or_else(|e| {
                 panic!("[{name}/{seed}] generated checks do not parse: {e:?}\n{with_checks}")
             });
+
+            // and printing them again gives the same text, ie the brackets we print are the
+            // ones the parser needs, no more and no less
+            let printed: String = reparsed
+                .properties
+                .iter()
+                .map(|(_, f)| format!("check {f}\n"))
+                .collect();
+            assert_eq!(
+                printed, checks,
+                "[{name}/{seed}] checks do not survive a reprint"
+            );
         }
     }
 }
