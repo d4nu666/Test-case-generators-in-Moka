@@ -12,7 +12,9 @@
 do
 x >= 0 -> x := x-1
 od
-check F x = -1              // should hold
+`;
+
+  let checks = `check F x = -1              // should hold
 check F x = -2              // should not hold
 check G x = -1              // should not hold
 check ! F ! (x = -1)        // should not hold
@@ -20,6 +22,11 @@ check ! (true U ! (x = -1)) // should not hold
 check G x >= -1             // should hold
 check ! F ! (x >= -1)       // should hold
 `;
+
+  // moka still wants one file, so glue the boxes back together before parsing.
+  // checkOffset = how many lines the program eats, anything below that came from the check box
+  $: source = `${program}\n${checks}`;
+  $: checkOffset = program.split('\n').length;
 
   let result = writable<LtLResult>({
     parse_error: false,
@@ -78,8 +85,32 @@ check ! F ! (x >= -1)       // should hold
   } else {
     hoverMakers = [];
   }
+  // markers are numbered against the glued source, so send each one back to its own box.
+  // the check ones keep their index so hovering a failed check still lights up the states
+  $: checkMarkers = $result.markers
+    .map((m, i) => ({ i, m: m[0] }))
+    .filter(({ m }) => m.span.startLineNumber > checkOffset)
+    .map(({ i, m }) => ({
+      i,
+      m: {
+        ...m,
+        span: {
+          ...m.span,
+          startLineNumber: m.span.startLineNumber - checkOffset,
+          endLineNumber: m.span.endLineNumber - checkOffset,
+        },
+      },
+    }));
+
+  $: programMarkers = [
+    ...$result.markers.map((m) => m[0]).filter((m) => m.span.startLineNumber <= checkOffset),
+    ...$verifications,
+    ...hoverMakers,
+  ];
+
+  $: hoveredCheck = typeof hoveredMarker == 'number' ? checkMarkers[hoveredMarker]?.i : undefined;
   $: highlightedNodes =
-    (typeof hoveredMarker == 'number' && $result.markers[hoveredMarker]?.[1]) || [];
+    (typeof hoveredCheck == 'number' && $result.markers[hoveredCheck]?.[1]) || [];
 
   $: if (browser) {
     const run = async () => {
@@ -88,7 +119,7 @@ check ! F ! (x >= -1)       // should hold
       const { default: init, parse_ltl } = await import('chip-wasm');
       await init();
       console.time('run wasm');
-      const res = parse_ltl(program);
+      const res = parse_ltl(source);
       console.timeEnd('run wasm');
       if (res.parse_error) parseError.set(true);
       result.set(res);
@@ -173,12 +204,12 @@ check ! F ! (x >= -1)       // should hold
         <option value="stress">stress</option>
       </select>
     </div>
+    <div class="relative min-h-0 flex-[2]">
+      <Editor bind:value={program} markers={programMarkers} />
+    </div>
+    <div class="bg-slate-900 px-3 py-1.5 text-sm font-bold text-white">Check</div>
     <div class="relative min-h-0 flex-1">
-      <Editor
-        bind:value={program}
-        bind:hoveredMarker
-        markers={[...$result.markers.map((m) => m[0]), ...$verifications, ...hoverMakers]}
-      />
+      <Editor bind:value={checks} bind:hoveredMarker markers={checkMarkers.map((c) => c.m)} />
     </div>
   </div>
   <div class="flex flex-col text-white">
