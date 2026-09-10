@@ -105,7 +105,9 @@
   }
   $: if (editor) {
     monaco.languages.registerHoverProvider('gcl', {
-      provideHover(model, position, token) {
+      provideHover(hovered, position, token) {
+        // there is more than one editor on the page now, so only answer for our own model
+        if (hovered != model) return null;
         const found = markers.findIndex((marker) => {
           const { column, lineNumber } = position;
           // check if positions is within the marker
