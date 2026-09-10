@@ -783,3 +783,72 @@ fn faulting_programs_are_rejected_when_asked() {
         }
     }
 }
+
+// a check the parser cannot read back is no use to anyone
+#[test]
+fn generated_checks_parse() {
+    use crate::{generate::props, model_check::ReachableStates};
+
+    for (name, params) in presets() {
+        for seed in 0..60 {
+            let Some(a) = crate::generate::accepted_program(&params, seed) else {
+                continue;
+            };
+            let src = a.program.to_string();
+            let ast = parse_ltl_program(&src).unwrap();
+            let Ok(rs) = ReachableStates::generate(&ast, params.explore_fuel) else {
+                continue;
+            };
+
+            let checks = props::check_lines(&rs, 5, seed);
+            let with_checks = format!("{src}{checks}");
+            parse_ltl_program(&with_checks).unwrap_or_else(|e| {
+                panic!("[{name}/{seed}] generated checks do not parse: {e:?}\n{with_checks}")
+            });
+        }
+    }
+}
+
+#[test]
+#[ignore = "reporting run, not an assertion"]
+fn m65_checks() {
+    use crate::{generate::props, model_check::ReachableStates};
+
+    let programs = [
+        (
+            "the moka front page",
+            "> x = 30\ndo\nx >= 0 -> x := x-1\nod\n".to_string(),
+        ),
+        (
+            "generated, seed 3125285899",
+            crate::generate::accepted_program(&Params::teaching(), 3125285899)
+                .unwrap()
+                .program
+                .to_string(),
+        ),
+    ];
+
+    for (name, src) in programs {
+        let ast = parse_ltl_program(&src).unwrap();
+        let rs = ReachableStates::generate(&ast, 5000).ok().unwrap();
+        println!("--- {name} ---\n{src}");
+        for f in props::properties(&rs, 6, 1) {
+            let pl = rs.pipeline(&f);
+            let verdict = match pl.product_ba().find_accepting_cycle() {
+                None => "holds".to_string(),
+                Some(cycle) => {
+                    let mut trace = Vec::new();
+                    for (top, _) in cycle.iter() {
+                        if let crate::model_check::State::Real(s) = pl.buchi.id(top) {
+                            trace.push(s.clone());
+                        }
+                    }
+                    crate::explain::why_failed(&f, &trace, &rs.program)
+                        .unwrap_or_else(|| "does not hold".to_string())
+                }
+            };
+            println!("check {f}\n    -> {verdict}");
+        }
+        println!();
+    }
+}
