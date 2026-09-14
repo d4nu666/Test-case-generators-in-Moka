@@ -199,6 +199,65 @@ check ! F ! (x >= -1)       // should hold
       .replaceAll(/\]\[shape/g, ',shape');
 
   let pauseGraphRendering = false;
+
+  // the program/check split, as a percent of the two editor boxes. the check bar is the handle
+  const SPLIT_KEY = 'moka-split';
+  const SPLIT_MIN = 15;
+  const SPLIT_MAX = 85;
+  let split = 66;
+  let programPane: HTMLDivElement;
+  let checkPane: HTMLDivElement;
+  let dragging = false;
+  // measured once on pointerdown so a drag is not doing layout reads every move
+  let dragTop = 0;
+  let dragSpan = 1;
+  let grabOffset = 0;
+
+  if (browser) {
+    const saved = Number(localStorage.getItem(SPLIT_KEY));
+    if (saved >= SPLIT_MIN && saved <= SPLIT_MAX) split = saved;
+  }
+
+  const clampSplit = (pct: number) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, pct));
+
+  const rememberSplit = () => {
+    if (browser) localStorage.setItem(SPLIT_KEY, String(Math.round(split)));
+  };
+
+  const startResize = (e: PointerEvent) => {
+    // the bar also holds the generate button, do not start a drag on it
+    if ((e.target as HTMLElement).closest('button')) return;
+    const top = programPane.getBoundingClientRect();
+    const bottom = checkPane.getBoundingClientRect();
+    dragTop = top.top;
+    // the bars are a fixed height so the two boxes together stay the same all through the drag
+    dragSpan = Math.max(top.height + bottom.height, 1);
+    grabOffset = e.clientY - (e.currentTarget as HTMLElement).getBoundingClientRect().top;
+    dragging = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const moveResize = (e: PointerEvent) => {
+    if (!dragging) return;
+    // subtract where in the bar it was grabbed so the bar stays under the cursor
+    split = clampSplit(((e.clientY - grabOffset - dragTop) / dragSpan) * 100);
+  };
+
+  const endResize = (e: PointerEvent) => {
+    if (!dragging) return;
+    dragging = false;
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    rememberSplit();
+  };
+
+  // arrow keys too, a separator you can only drag is no good with a keyboard
+  const keyResize = (e: KeyboardEvent) => {
+    const step = e.key === 'ArrowUp' ? -4 : e.key === 'ArrowDown' ? 4 : 0;
+    if (!step) return;
+    e.preventDefault();
+    split = clampSplit(split + step);
+    rememberSplit();
+  };
 </script>
 
 <svelte:head>
@@ -228,10 +287,29 @@ check ! F ! (x >= -1)       // should hold
         <option value="stress">stress</option>
       </select>
     </div>
-    <div class="relative min-h-0 flex-[2]">
+    <div bind:this={programPane} class="relative min-h-0" style="flex: {split} 1 0%">
       <Editor bind:value={program} markers={programMarkers} />
     </div>
-    <div class="flex items-center space-x-3 bg-slate-900 px-3 py-1.5 text-sm text-white">
+    <!-- a focusable separator with a value is the aria splitter pattern, svelte just does not know it -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="resize the check box"
+      aria-valuenow={Math.round(100 - split)}
+      aria-valuemin={100 - SPLIT_MAX}
+      aria-valuemax={100 - SPLIT_MIN}
+      tabindex="0"
+      on:pointerdown={startResize}
+      on:pointermove={moveResize}
+      on:pointerup={endResize}
+      on:pointercancel={endResize}
+      on:keydown={keyResize}
+      class="flex cursor-row-resize items-center space-x-3 bg-slate-900 px-3 py-1.5 text-sm text-white select-none {dragging
+        ? 'bg-slate-700'
+        : 'hover:bg-slate-800'}"
+    >
       <span class="text-slate-400">Check</span>
       <button
         on:click={generateChecks}
@@ -241,7 +319,7 @@ check ! F ! (x >= -1)       // should hold
         {generatingChecks ? 'Generating...' : 'Generate'}
       </button>
     </div>
-    <div class="relative min-h-0 flex-1">
+    <div bind:this={checkPane} class="relative min-h-0" style="flex: {100 - split} 1 0%">
       <Editor bind:value={checks} bind:hoveredMarker markers={checkMarkers.map((c) => c.m)} />
     </div>
   </div>
