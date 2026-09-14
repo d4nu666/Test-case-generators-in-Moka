@@ -207,24 +207,57 @@ impl Display for Locator {
         }
     }
 }
+// brackets only where the parser needs them, so a check reads like one a person would write:
+// F x = -1 and not F((x = -1))
+
+// binary ops need brackets almost everywhere, a relation only when it sits next to one
+fn is_binary(f: &LTLFormula) -> bool {
+    matches!(
+        f,
+        LTLFormula::And(..) | LTLFormula::Or(..) | LTLFormula::Implies(..) | LTLFormula::Until(..)
+    )
+}
+
+// operand of & | ==> U, or the thing after a !
+struct Group<'a>(&'a LTLFormula);
+
+impl Display for Group<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if is_binary(self.0) || matches!(self.0, LTLFormula::Rel(..)) {
+            write!(f, "({})", self.0)
+        } else {
+            write!(f, "{}", self.0)
+        }
+    }
+}
+
+// argument of X G or F. a relation is fine bare here, F x = -1 parses
+struct Arg<'a>(&'a LTLFormula);
+
+impl Display for Arg<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if is_binary(self.0) {
+            write!(f, "({})", self.0)
+        } else {
+            write!(f, "{}", self.0)
+        }
+    }
+}
+
 impl Display for LTLFormula {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LTLFormula::Bool(b) => write!(f, "{b}"),
             LTLFormula::Locator(locator) => write!(f, "{locator}"),
-            LTLFormula::Rel(aexpr, rel_op, aexpr1) => write!(f, "({aexpr} {rel_op} {aexpr1})"),
-            LTLFormula::Not(ltlformula) => write!(f, "!{ltlformula}"),
-            LTLFormula::And(ltlformula, ltlformula1) => write!(f, "({ltlformula} & {ltlformula1})"),
-            LTLFormula::Or(ltlformula, ltlformula1) => write!(f, "({ltlformula} | {ltlformula1})"),
-            LTLFormula::Implies(ltlformula, ltlformula1) => {
-                write!(f, "({ltlformula} ==> {ltlformula1})")
-            }
-            LTLFormula::Until(ltlformula, ltlformula1) => {
-                write!(f, "({ltlformula} U {ltlformula1})")
-            }
-            LTLFormula::Next(ltlformula) => write!(f, "X({ltlformula})"),
-            LTLFormula::Globally(ltlformula) => write!(f, "G({ltlformula})"),
-            LTLFormula::Finally(ltlformula) => write!(f, "F({ltlformula})"),
+            LTLFormula::Rel(l, op, r) => write!(f, "{l} {op} {r}"),
+            LTLFormula::Not(x) => write!(f, "! {}", Group(x)),
+            LTLFormula::And(l, r) => write!(f, "{} & {}", Group(l), Group(r)),
+            LTLFormula::Or(l, r) => write!(f, "{} | {}", Group(l), Group(r)),
+            LTLFormula::Implies(l, r) => write!(f, "{} ==> {}", Group(l), Group(r)),
+            LTLFormula::Until(l, r) => write!(f, "{} U {}", Group(l), Group(r)),
+            LTLFormula::Next(x) => write!(f, "X {}", Arg(x)),
+            LTLFormula::Globally(x) => write!(f, "G {}", Arg(x)),
+            LTLFormula::Finally(x) => write!(f, "F {}", Arg(x)),
         }
     }
 }
@@ -254,5 +287,43 @@ impl Display for LTLProgram {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parse::parse_ltl_program;
+
+    // the checks on the moka front page, written by hand. printing them back should give the
+    // same text, no extra brackets
+    #[test]
+    fn checks_print_the_way_people_write_them() {
+        let src = "> x = 30
+do
+x >= 0 -> x := x-1
+od
+check F x = -1
+check F x = -2
+check G x = -1
+check ! F ! (x = -1)
+check ! (true U ! (x = -1))
+check G x >= -1
+check ! F ! (x >= -1)
+";
+        let ast = parse_ltl_program(src).unwrap();
+        let printed: Vec<String> = ast.properties.iter().map(|(_, f)| f.to_string()).collect();
+
+        assert_eq!(
+            printed,
+            [
+                "F x = -1",
+                "F x = -2",
+                "G x = -1",
+                "! F ! (x = -1)",
+                "! (true U ! (x = -1))",
+                "G x >= -1",
+                "! F ! (x >= -1)",
+            ]
+        );
     }
 }

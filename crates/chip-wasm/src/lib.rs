@@ -266,6 +266,9 @@ impl Drop for TimingGuard {
 // the filter uses this too, so a generated program cannot explode once it is in the editor
 const FUEL: u32 = 5000;
 
+// how many steps of a counterexample the hover box shows before it gets silly
+const TRACE_ROWS: usize = 10;
+
 #[wasm_bindgen]
 pub fn parse_ltl(src: &str) -> LtLResult {
     let timing = Timing::default();
@@ -448,6 +451,7 @@ pub fn parse_ltl(src: &str) -> LtLResult {
                         .collect(),
                         rows: trace
                             .iter()
+                            .take(TRACE_ROWS)
                             .enumerate()
                             .map(|(idx, s)| {
                                 std::iter::once((
@@ -463,12 +467,22 @@ pub fn parse_ltl(src: &str) -> LtLResult {
                             .collect(),
                     };
 
+                    // first line is what the editor shows on the squiggle, so say why it broke
+                    let reason = chip::explain::why_failed(property, &trace, &rs.program)
+                        .unwrap_or_else(|| "LTL property does not hold".to_string());
+
+                    // a 40 step trace in a hover box is unreadable, cut it and say how much is left
+                    let cut = match trace.len().saturating_sub(TRACE_ROWS) {
+                        0 => String::new(),
+                        n => format!("\n\n... {n} more step(s)"),
+                    };
+
                     markers.push((
                         MarkerData {
                             related_information: None,
                             tags: None,
                             severity: MarkerSeverity::Error,
-                            message: format!("LTL property does not hold\n\n{html_table}"),
+                            message: format!("{reason}\n\n{html_table}{cut}"),
                             span: MonacoSpan::from_offset_len(
                                 src,
                                 property_span.offset(),
@@ -586,5 +600,44 @@ pub fn generate_program(seed: u32, preset: &str) -> GeneratedProgram {
             attempts: e.attempts,
             accepted: false,
         },
+    }
+}
+
+// the generate button on the check box. same idea as the program one, only it needs a program
+// to look at first
+
+#[derive(Debug, Clone, Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedChecks {
+    // check lines, empty when something went wrong
+    pub checks: String,
+    // why nothing came back, for the status bar
+    pub error: Option<String>,
+}
+
+fn failed(why: &str) -> GeneratedChecks {
+    GeneratedChecks {
+        checks: String::new(),
+        error: Some(why.to_string()),
+    }
+}
+
+#[wasm_bindgen]
+pub fn generate_checks(program: &str, seed: u32, count: usize) -> GeneratedChecks {
+    let Ok(ast) = chip::parse::parse_ltl_program(program) else {
+        return failed("the program does not parse");
+    };
+    let Ok(rs) = ReachableStates::generate(&ast, FUEL) else {
+        return failed("too many states to look at");
+    };
+
+    let checks = chip::generate::props::check_lines(&rs, count, seed as u64);
+    if checks.is_empty() {
+        return failed("nothing worth checking in this program");
+    }
+    GeneratedChecks {
+        checks,
+        error: None,
     }
 }

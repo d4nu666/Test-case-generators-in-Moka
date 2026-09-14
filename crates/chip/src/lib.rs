@@ -2,6 +2,7 @@ pub mod agcl;
 pub mod ast;
 pub mod ast_ext;
 pub mod ast_smt;
+pub mod explain;
 pub mod fmt;
 #[cfg(feature = "generate")]
 pub mod generate;

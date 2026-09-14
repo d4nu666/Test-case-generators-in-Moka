@@ -37,6 +37,9 @@
         scrollBeyondLastLine: false,
         language: GCL_LANGUAGE_ID,
         readOnly,
+        // let hovers spill outside the editor, otherwise the counterexample table gets cut off
+        // by the check box, which is only a few lines tall
+        fixedOverflowWidgets: true,
       });
       model = monaco.editor.createModel(value, GCL_LANGUAGE_ID);
       editor.setModel(model);

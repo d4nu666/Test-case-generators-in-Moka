@@ -166,6 +166,30 @@ check ! F ! (x >= -1)       // should hold
     }
   };
 
+  // same thing for the check box, only this one needs a program to look at first
+  let generatingChecks = false;
+
+  const generateChecks = async () => {
+    generatingChecks = true;
+    generateError = null;
+    try {
+      const { default: init, generate_checks } = await import('chip-wasm');
+      await init();
+      const seed = Math.floor(Math.random() * 2 ** 32);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const res = generate_checks(program, seed, 5);
+      if (res.error) {
+        generateError = res.error;
+      } else {
+        checks = res.checks;
+      }
+    } catch (e) {
+      generateError = String(e);
+    } finally {
+      generatingChecks = false;
+    }
+  };
+
   const prepareDot = (dot: string) =>
     dot
       .trim()
@@ -207,7 +231,16 @@ check ! F ! (x >= -1)       // should hold
     <div class="relative min-h-0 flex-[2]">
       <Editor bind:value={program} markers={programMarkers} />
     </div>
-    <div class="bg-slate-900 px-3 py-1.5 text-sm font-bold text-white">Check</div>
+    <div class="flex items-center space-x-3 bg-slate-900 px-3 py-1.5 text-sm text-white">
+      <span class="text-slate-400">Check</span>
+      <button
+        on:click={generateChecks}
+        disabled={generatingChecks}
+        class="font-bold transition hover:text-slate-300 disabled:opacity-50"
+      >
+        {generatingChecks ? 'Generating...' : 'Generate'}
+      </button>
+    </div>
     <div class="relative min-h-0 flex-1">
       <Editor bind:value={checks} bind:hoveredMarker markers={checkMarkers.map((c) => c.m)} />
     </div>
