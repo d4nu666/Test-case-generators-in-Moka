@@ -138,12 +138,13 @@ check ! F ! (x >= -1)       // should hold
   let generated: { seed: number; attempts: number } | null = null;
   let generateError: string | null = null;
 
-  const generateProgram = async () => {
+  // one button fills both boxes: the program first, then checks drawn from that program
+  const generate = async () => {
     generating = true;
     generateError = null;
     generated = null;
     try {
-      const { default: init, generate_program } = await import('chip-wasm');
+      const { default: init, generate_program, generate_checks } = await import('chip-wasm');
       await init();
       // seed from js so it stays a plain number, and so chip generate can reuse it
       const seed = Math.floor(Math.random() * 2 ** 32);
@@ -152,41 +153,24 @@ check ! F ! (x >= -1)       // should hold
       console.time('generate wasm');
       const res = generate_program(seed, preset);
       console.timeEnd('generate wasm');
-      if (res.accepted) {
-        program = res.program;
-        generated = { seed: res.seed, attempts: res.attempts };
-      } else {
+      if (!res.accepted) {
         // a dead seed is about the params, not the browser. press it again
         generateError = `no program passed the filter in ${res.attempts} tries`;
+        return;
+      }
+      // the checks read the reachable states, so they have to see the new program
+      const checkRes = generate_checks(res.program, seed, 5);
+      program = res.program;
+      if (checkRes.error) {
+        generateError = checkRes.error;
+      } else {
+        checks = checkRes.checks;
+        generated = { seed: res.seed, attempts: res.attempts };
       }
     } catch (e) {
       generateError = String(e);
     } finally {
       generating = false;
-    }
-  };
-
-  // same thing for the check box, only this one needs a program to look at first
-  let generatingChecks = false;
-
-  const generateChecks = async () => {
-    generatingChecks = true;
-    generateError = null;
-    try {
-      const { default: init, generate_checks } = await import('chip-wasm');
-      await init();
-      const seed = Math.floor(Math.random() * 2 ** 32);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      const res = generate_checks(program, seed, 5);
-      if (res.error) {
-        generateError = res.error;
-      } else {
-        checks = res.checks;
-      }
-    } catch (e) {
-      generateError = String(e);
-    } finally {
-      generatingChecks = false;
     }
   };
 
@@ -225,8 +209,6 @@ check ! F ! (x >= -1)       // should hold
   };
 
   const startResize = (e: PointerEvent) => {
-    // the bar also holds the generate button, do not start a drag on it
-    if ((e.target as HTMLElement).closest('button')) return;
     const top = programPane.getBoundingClientRect();
     const bottom = checkPane.getBoundingClientRect();
     dragTop = top.top;
@@ -271,7 +253,7 @@ check ! F ! (x >= -1)       // should hold
   <div class="flex min-h-0 flex-col">
     <div class="flex items-center space-x-3 bg-slate-900 px-3 py-1.5 text-sm text-white">
       <button
-        on:click={generateProgram}
+        on:click={generate}
         disabled={generating}
         class="font-bold transition hover:text-slate-300 disabled:opacity-50"
       >
@@ -311,13 +293,6 @@ check ! F ! (x >= -1)       // should hold
         : 'hover:bg-slate-800'}"
     >
       <span class="text-slate-400">Check</span>
-      <button
-        on:click={generateChecks}
-        disabled={generatingChecks}
-        class="font-bold transition hover:text-slate-300 disabled:opacity-50"
-      >
-        {generatingChecks ? 'Generating...' : 'Generate'}
-      </button>
     </div>
     <div bind:this={checkPane} class="relative min-h-0" style="flex: {100 - split} 1 0%">
       <Editor bind:value={checks} bind:hoveredMarker markers={checkMarkers.map((c) => c.m)} />
