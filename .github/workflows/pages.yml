@@ -43,6 +43,10 @@ jobs:
           npm ci
           npm run build
           touch build/.nojekyll
+          # only moka goes online, drop the chip and guide pages and the z3 files only chip uses
+          rm -f build/chip.html build/guide.html build/z3-built.*
+          # the site root is the chip/moka picker, send people straight to moka instead
+          echo '<!doctype html><meta http-equiv="refresh" content="0; url=./moka"><script>location.replace("./moka")</script>' > build/index.html
 
       - uses: actions/upload-pages-artifact@v3
         with:
