@@ -10,6 +10,8 @@ export default function wasmPack(config: WasmPackConfig): Plugin {
 
   return {
     name: 'wasm-pack',
+    // only for dev, the build already has pkg from just build-wasm and ci has no cargo-watch
+    apply: 'serve',
     buildStart() {
       for (const crate of config.crates) {
         const lib = path.resolve(normalizePath(crate));
