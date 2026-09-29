@@ -6,7 +6,7 @@
 This repository is my working fork of the [Team Checkr](https://github.com/team-checkr) toolchain
 behind [Moka](https://team-checkr.github.io/), extended with test case generators.
 
-![Moka running an LTL model-checking example](moka-screenshot.png)
+**Try Moka with the generators live:** https://d4nu666.github.io/Test-case-generators-in-Moka/
 
 ## What is this about?
 
