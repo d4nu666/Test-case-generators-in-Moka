@@ -1,0 +1,59 @@
+# builds the chip app (chip + moka pages) and puts it on github pages
+name: pages
+
+on:
+  push:
+    branches: [thesis/moka-redesign]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # .cargo/config.toml at the root sets the getrandom flag, so this just works
+      - name: build wasm
+        run: cd crates/chip-wasm && wasm-pack build --target web --release
+
+      - name: build site
+        working-directory: apps/chip
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}
+        run: |
+          npm ci
+          npm run build
+          touch build/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/chip/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
