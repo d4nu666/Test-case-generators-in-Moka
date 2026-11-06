@@ -848,16 +848,7 @@ fn m65_checks() {
             let pl = rs.pipeline(&f);
             let verdict = match pl.product_ba().find_accepting_cycle() {
                 None => "holds".to_string(),
-                Some(cycle) => {
-                    let mut trace = Vec::new();
-                    for (top, _) in cycle.iter() {
-                        if let crate::model_check::State::Real(s) = pl.buchi.id(top) {
-                            trace.push(s.clone());
-                        }
-                    }
-                    crate::explain::why_failed(&f, &trace, &rs.program)
-                        .unwrap_or_else(|| "does not hold".to_string())
-                }
+                Some(_) => "does not hold".to_string(),
             };
             println!("check {f}\n    -> {verdict}");
         }
